@@ -22,7 +22,7 @@ class SignatureMethod {
 /// A abstract class contains Signature Methods.
 abstract class SignatureMethods {
   /// http://tools.ietf.org/html/rfc5849#section-3.4.2
-  static final SignatureMethod HMAC_SHA1 =
+  static final SignatureMethod hmacSha1 =
       SignatureMethod('HMAC-SHA1', (String key, String text) {
     final Hmac hmac = Hmac(sha1, key.codeUnits);
     final List<int> bytes = hmac.convert(text.codeUnits).bytes;
