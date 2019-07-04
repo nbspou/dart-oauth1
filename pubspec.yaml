@@ -1,6 +1,6 @@
 name: oauth1
-version: 1.0.4
-description: "\"RFC 5849: The OAuth 1.0 Protocol\" client implementation for Dart."
+version: 1.1.0-alpha
+description: OAuth1 clients and servers conforming to "\"RFC 5849: The OAuth 1.0 Protocol\".
 homepage: https://github.com/nbspou/dart-oauth1
 author: kumar8600 <kumar1@hotmail.co.jp>
 
@@ -12,4 +12,5 @@ dependencies:
   http: '>=0.11.0 < 0.13.0'
 
 dev_dependencies:
+  args: ^1.5.1
   test: ^1.0.0

@@ -1,21 +1,19 @@
 OAuth1
-===========
+======
 
 [![Build Status](https://travis-ci.org/nbspou/dart-oauth1.svg?branch=fork/nbspou)](https://travis-ci.org/nbspou/dart-oauth1)
 
-"[RFC 5849: The OAuth 1.0 Protocol][rfc5849]" client implementation for dart
+Library for implementing OAuth1 clients and servers according to OAuth 1a
+as defined by [RFC 5849: The OAuth 1.0 Protocol][rfc5849].
+
+Currently only HMAC-SHA1 is supported.
 
 Usage
 -----
 
-Add to `pubspec.yaml`:
+### OAuth1 client
 
-```yaml
-dependencies:
-  oauth1: ^1.0.4
-```
-
-Please use like below.
+Here is an example of an OAuth1 client:
 
 ```dart
 import 'dart:io';
@@ -66,6 +64,29 @@ void main() {
 
 ```
 
-In addition, You should save and load the granted token credentials from your drive. Of cource, you don't need to authorize when you did it.
+Once the access token has been obtained, it may be used for multiple
+requests.  The client may find it useful to save the access token for
+future use, so it doesn't have to go through the three-legged-OAuth
+process again. But the usefulness of that will depend on the policy of
+the server and if access tokens expire or not.
+
+Also, see the _example_client.dart_ under the _example_ directory.
+
+### OAuth1 server
+
+An OAuth1 server is a HTTP server that issues and manages temporary
+credentials and access tokens.
+
+This library can be used to parse the _Authorization_ headers that an
+OAuth1 client sends in its HTTP requests to the OAuth1 server. Also
+use the library to validate the signature in the _Authorization_
+header. If the signature is valid, then the server can use the
+properties in the header to issue/manage temporary credentials and
+access tokens.
+
+See the _example_server.dart_ under the _example_ directory for how to
+use the library to create an OAuth1 server.
+
+
 
 [rfc5849]: http://tools.ietf.org/html/rfc5849
