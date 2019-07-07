@@ -2,7 +2,18 @@ library credentials;
 
 import 'dart:convert';
 
+import 'package:oauth1/oauth1.dart';
+
 /// A class describing OAuth credentials except for client credential
+///
+/// This class is used to represent **temporary credentials** (also known as an
+/// "authorization request") and **token credentials** (also known as an
+/// "access token" or "access grant") - two of the three classes
+/// of OAuth credentials.
+///
+/// It is not used for "client credentials", which are represented by
+/// [ClientCredentials].
+///
 class Credentials {
   final String _token;
   final String _tokenSecret;

@@ -1,16 +1,41 @@
 /// Example OAuth1a server.
 ///
+/// Implements a server for OAuth 1a three-legged-OAuth.
+///
 /// RFC 5849, "The OAuth 1.0 Protocol", April 2010.
 ///
-// OAuth Core 1.0 Revision A, 24 June 2009.
-
-// OAuth 1a three-legged-OAuth
+/// Note: the RFC supercedes the older "OAuth Core 1.0 Revision A", 24 June
+/// 2009, which is sometimes referred to as OAuth1a.
+///
+/// An OAuth server performs many tasks. In addition to implementing the
+/// protocol, it also needs to track the _resource owners_ and registered
+/// _clients_ and managing the lifecycle of _temporary credentials_ and _access
+/// tokens_.
+///
+/// This program is organised into these sections:
+///
+///  - Constants
+///  - Exception classes
+///  - The entities:
+///    - resource owners
+///    - clients
+///  - Code to generate random strings
+///  - The OAuth1 tokens
+///    - temporary credentials
+///    - access tokens
+///  - Framework for processing HTTP requests
+///    - utility functions
+///    - Http request handlers
+///  - The main function
 
 import 'dart:async';
 import 'dart:convert';
 
 import 'dart:io';
 import 'dart:math';
+
+import 'package:args/args.dart';
+import 'package:encrypt/encrypt.dart';
 import 'package:oauth1/oauth1.dart' as oauth1;
 
 // Dart Linter overrides
@@ -56,13 +81,43 @@ final List<ResourceOwnerInfo> resourceOwners = [
 // The clients
 //
 // The programs that want to access the protected resources on this server.
-// This test value corresponds to the default API key and API secret hard-coded
-// in the example client.
+// This test value corresponds to the default identity and secret hard-coded
+// in the example client. Additional clients can be added via the command line.
 
 final List<ClientInfo> registeredClients = [
   ClientInfo('dart-oauth1-test', 'LLDeVY0ySvjoOVmJ2XgBItvTV',
-      'JmEpkWXXmY7BYoQor5AyR84BD2BiN47GIBUPXn3bopZqodJ0MV')
+      sharedSecret: 'JmEpkWXXmY7BYoQor5AyR84BD2BiN47GIBUPXn3bopZqodJ0MV',
+      pemPublicKey: '''
+-----BEGIN RSA PUBLIC KEY-----
+MIICCgKCAgEAsBYJRkO/c6eMgUosXpHXCBH5uE3+gR04IvkNzz5z9phaMxHUITSG
+9qdJ7+sGgGnIl4Zd+NnwtfP+cUZaP46ySh+OHPFNt+MnwAd1hveJeG+9cB9Nd3je
+ytdQHtqoE47kai7kNuLFEVHst0+wa3+aoJnrFckii5SK6g2tWiP9Z9IyiCLS7//U
+GQQD3Q1zxqsTQCWKpQkcVKzkiq198pl2gI6qDsSO6cusg6tLqcf243C4/RkGf1EL
+ug6AHte1T1ip0Czoj6VkmeiMUqSBvNmJOHLAuqaaltC+6Q07PC+Lm8/m1RJnQkmF
+VOY1DDc/TSWwYO/DCsoarM3LjxFDTOSnhE4qZXn0f2hV48syqbavW0IKmCH+JHWW
+oZgVm0ZDB3hMwlY2UaAnranw/EOONnAim2ebZoKbeaBX5KhtY1CNF6cMdNDx0D/B
+4zZHcza3/BgN35PiVDj8teDX3bjwL2+sCkbaH9BKadal3VBw2RK7hPgMq26i57iY
+AFDaXX9poFVZYrzHkVf2ja58TRF2fOZ85AV2uVoY0E3AN6GIPJQu16/SD6MPhneY
+NiuqbV+RBsficySkdwRdcS8O+/FP928G67lEK2/akdhp0yhLlDQNlr2froIbBlaQ
+xQVq0xyuiGr068ndvtFTiVVQh/JwC8bXMmh8IgI5A5XZb5AX0RpFcScCAwEAAQ==
+-----END RSA PUBLIC KEY-----
+      ''')
 ];
+
+//################################################################
+// Globals
+
+/// Program options that can be set via the command line.
+
+Arguments options;
+
+/// Tracks nonce/timestamp/token combinations that have been seen to prevent
+/// replay attacks.
+///
+/// TODO: implement a mechanism to delete old entries.
+/// Currently, this just grows and grows until the server runs out of memory!
+
+Map<String, bool> seenNonceCombination = {};
 
 //################################################################
 // Exceptions
@@ -84,7 +139,6 @@ class BadRequestException implements Exception {
   @override
   String toString() => message;
 }
-
 
 class ResourceOwnerUnknown implements Exception {
   ResourceOwnerUnknown(this.username);
@@ -162,24 +216,36 @@ class ResourceOwnerInfo {
 }
 
 //################################################################
-/// Clients.
+/// Information about clients this server recognises.
 ///
-/// The registered clients. Clients are identified by an [apiKey] and the
-/// client and this server both have the shared [apiSecret]. The [description]
-/// is a name for the client that intended for display to users.
+/// Clients are identified by its [identifier] and the [name] is used for
+/// display purposes only.
+///
+/// If using HMAC-SHA1 or PLAINTEXT, the client and this server both need to
+/// have the same [sharedSecret]. If using RSA-SHA1, the [pemPublicKey] needs to
+/// be the PEM formatted public key that corresponds to the private key the
+/// client has.
 
 class ClientInfo {
-  ClientInfo(this.description, this.apiKey, this.apiSecret);
-  String description;
-  String apiKey;
-  String apiSecret;
+  ClientInfo(this.name, String identifier,
+      {String sharedSecret, String pemPublicKey}) {
+    final keyParser = RSAKeyParser();
+    final pubKey = pemPublicKey != null ? keyParser.parse(pemPublicKey) : null;
+
+    credentials =
+        oauth1.ClientCredentials(identifier, sharedSecret, publicKey: pubKey);
+  }
+
+  String name;
+
+  oauth1.ClientCredentials credentials;
 
   /// Search for a client by their [key].
   ///
   /// Throws [ClientUnknown] if not found.
 
   static ClientInfo lookup(String key) =>
-      registeredClients.firstWhere((x) => x.apiKey == key,
+      registeredClients.firstWhere((x) => x.credentials.identifier == key,
           orElse: () => throw ClientUnknown(key));
 }
 
@@ -202,7 +268,7 @@ const String _rndChars =
 
 final _rnd = Random.secure();
 // Less secure implementation:
-//   final _rnd = Random.secure(DateTime.now().millisecondsSinceEpoch);
+//   final _rnd = Random(DateTime.now().millisecondsSinceEpoch);
 
 /// Generates a random string.
 ///
@@ -228,6 +294,10 @@ String randomString(int length) {
 /// _verified_ state. Then, when the client exchanges it for an access token,
 /// it is changed to the _used_ state. If it reaches its lifetime before
 /// it enters the _used_ state, it becomes _expired_.
+///
+/// Previous versions of the specification referred to these as the "request
+/// token" and its secret. This program only uses the word "token" in reference
+/// to the "token credentials" (a.k.a. the access token).
 
 enum TmpCredState { pendingVerification, verified, used, expired }
 
@@ -271,14 +341,27 @@ class TemporaryCredentialInfo {
   final String identifier;
   final String secret;
 
-  final ClientInfo client;
-  final String callback;
+  /// When the temporary token was issued
   final DateTime issued;
 
-  TmpCredState _state;
+  /// The client that requested the temporary credentials
+  final ClientInfo client;
 
+  /// The callback the client wanted to receive the verifier on (or "oob")
+  final String callback;
+
+  /// The resource owner who approved the temporary credential
+  /// Only has a value if it has been approved.
   ResourceOwnerInfo approver;
+
+  /// The verifier value assigned to this temporary credential
+  ///
+  /// Only has a value if it has been approved by a resource owner. The client
+  /// must present this value to exchange this temporary credential for an
+  /// access token.
   String _verifier;
+
+  TmpCredState _state;
 
   //================================================================
   // Methods
@@ -357,10 +440,13 @@ class TemporaryCredentialInfo {
 }
 
 //################################################################
-/// Manages the access tokens.
+/// Manages the token credentials.
+///
+/// Previous versions of the specification referred to these as the "access
+/// token" and its secret.
 
-class AccessToken {
-  AccessToken(this.resourceOwner)
+class TokenCredential {
+  TokenCredential(this.client, this.resourceOwner)
       : identifier = randomString(32),
         secret = randomString(48),
         issued = DateTime.now() {
@@ -383,7 +469,7 @@ class AccessToken {
   /// the code simple and so it can tell the difference between an expired
   /// token and an identifier that has never been issued.
 
-  static final Map<String, AccessToken> _allTokens = {};
+  static final Map<String, TokenCredential> _allTokens = {};
 
   //================================================================
   // Members
@@ -391,8 +477,13 @@ class AccessToken {
   final String identifier;
   final String secret;
 
+  /// When the access token was issued
   final DateTime issued;
 
+  // The client that the access token was issued to
+  final ClientInfo client;
+
+  // The resource owner that approved the access request
   final ResourceOwnerInfo resourceOwner;
 
   //================================================================
@@ -403,7 +494,7 @@ class AccessToken {
   /// Throws [AccessTokenUnknown] if the Access Token is not known.
   /// Throws [AccessTokenExpired] if the access token has expired.
 
-  static AccessToken lookup(String identity) {
+  static TokenCredential lookup(String identity) {
     final token = _allTokens[identity];
     if (token == null) {
       throw AccessTokenUnknown(identity);
@@ -456,7 +547,9 @@ Future<void> processHttpRequests(HttpServer server) async {
   await for (final HttpRequest request in server) {
     final path = request.requestedUri.path;
 
-    print('${DateTime.now()}: ${request.method} $path');
+    if (Verbosity.quiet.index < options.verbosity.index) {
+      print('${DateTime.now()}: ${request.method} $path');
+    }
 
     try {
       // Try to find a handler to process the request
@@ -661,27 +754,100 @@ class QueryParams {
 
       return QueryParams.fromQueryString(bodyStr);
     } else {
-      throw BadRequestException('missing Content-Type header');
+      return null;
     }
   }
 }
 
 //----------------------------------------------------------------
-/// Extracts the "Authorization" header from the [headers].
-///
-/// Throws [BadRequestException] if the headers don't contain exactly one
-/// Authorization header.
+/// Extracts parameters from an HTTP request.
 
-String _getAuthorizationHeader(HttpHeaders headers) {
-  final List<String> authHeaders = headers['authorization'];
+Future<oauth1.AuthorizationHeader> _getOAuthParams(HttpRequest request) async {
+  final auth = oauth1.AuthorizationHeader.empty();
 
-  if (authHeaders == null) {
-    throw BadRequestException('missing Authorization header');
-  } else if (authHeaders.length != 1) {
-    throw BadRequestException('multiple Authorization headers');
+  //--------
+  // Populate from any query parameters of the HTTP request URI
+  // Note: Query components can have multiple values for the same name
+
+  final queryParams = QueryParams.fromQueryString(request.requestedUri.query);
+  auth.addAll(queryParams.values);
+
+  //--------
+  // Populate from any "Authorization" header(s)
+
+  for (final headerValue in request.headers['authorization']) {
+    final isOAuthHeader = auth.addFromAuthorizationHeader(headerValue);
+
+    if (Verbosity.verbose.index < options.verbosity.index) {
+      print('${isOAuthHeader ? '' : 'Ignoring: '}$headerValue');
+    }
   }
 
-  return authHeaders.first;
+  //--------
+  // Populate from any form parameters
+
+  final postParams = await QueryParams.fromBody(request);
+  if (postParams != null) {
+    auth.addAll(postParams.values);
+  }
+
+  //--------
+  // Return result
+
+  if (Verbosity.normal.index < options.verbosity.index) {
+    print(auth);
+  }
+
+  return auth;
+}
+
+//----------------------------------------------------------------
+/// Records and checks the nonce, timestamp and token.
+///
+/// Section 3.2 of RFC 5849 says: "If using the "HMAC-SHA1" or "RSA-SHA1"
+/// signature methods, ensuring that the combination of nonce/timestamp/token
+/// (if present) received from the client has not been used before in a previous
+//  request (the server MAY reject requests with stale timestamps as
+//  described in Section 3.3).
+
+void checkNonce(oauth1.AuthorizationHeader auth) {
+  if (auth.signatureMethod == oauth1.SignatureMethods.hmacSha1.name ||
+      auth.signatureMethod == oauth1.SignatureMethods.rsaSha1.name) {
+    final nonce = auth.nonce;
+    assert(nonce != null, 'nonce missing: parser did not detect this');
+    if (nonce == null || nonce.length < 4) {
+      throw BadRequestException('Nonce is too short for my liking');
+    }
+
+    final timestamp = auth.timestamp;
+
+    final token = auth.token;
+
+    final combination = '$nonce:$timestamp:$token';
+    if (seenNonceCombination.containsKey(combination)) {
+      throw BadRequestException('OAuth HTTP request has already been received');
+    }
+
+    seenNonceCombination[combination] = true;
+  }
+}
+
+//----------------------------------------------------------------
+/// Debug method for showing the _signature base string_ when validating.
+///
+/// The _signature base string_ is the value that is signed. It is created from
+/// the authorization header parameters and the signature produced from it.
+/// This value is normally never seen by the application, but it is useful
+/// to know what it is when debugging OAuth1 implementations. A signature is
+/// invalid if the _signature base strings_ are different, the credentials are
+/// different or the signing method has a bug. Knowing what the _signature base
+/// string_ is can help isolate the problem. Otherwise, the signature validation
+/// process is a black box that either works or not.
+
+void dumpBaseString(String signatureBaseString) {
+  if (Verbosity.verbose.index < options.verbosity.index) {
+    print('  Signature base string: $signatureBaseString');
+  }
 }
 
 //################################################################
@@ -699,18 +865,24 @@ Future<void> handleTmpCredentialsRequest(HttpRequest request) async {
   // From the OAuth header, identify the client and validate the header was
   // signed by that client.
 
-  final authorizationHeader = _getAuthorizationHeader(request.headers);
-  final auth = oauth1.AuthorizationHeaderParser(authorizationHeader);
+  final auth = await _getOAuthParams(request);
 
-  final client = ClientInfo.lookup(auth.clientKey);
-  print('  request from client=${client.description}');
+  final client = ClientInfo.lookup(auth.clientIdentifier);
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print(
+        '  request from client="${client.name}" using ${auth.signatureMethod}');
+  }
 
   auth.validate(
-      request.method, request.requestedUri.toString(), client.apiSecret, null);
+      request.method, request.requestedUri.toString(), client.credentials, null,
+      debugBaseString: dumpBaseString);
+
+  checkNonce(auth);
 
   // Get the callback the client has indicated it wants to use
 
   final callback = auth.callback;
+
   if (callback == null) {
     throw BadRequestException('oauth_callback missing');
   }
@@ -723,7 +895,9 @@ Future<void> handleTmpCredentialsRequest(HttpRequest request) async {
 
   final tmpCred = TemporaryCredentialInfo(client, callback);
 
-  print('  issued temporary credential: ${tmpCred.identifier}');
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('  issued temporary credential: ${tmpCred.identifier}');
+  }
 
   // Produce response containing the temporary credential
 
@@ -791,7 +965,7 @@ td {
 <body>
 <h1>Authorizing client</h1>
 
-<p>The <strong>${tmpCred.client.description}</strong> client has requested
+<p>The <strong>${tmpCred.client.name}</strong> client has requested
 permission to access your resources.</p>
 
 <p>If you want to give it access, enter your username and password and press the
@@ -831,6 +1005,7 @@ Future<void> handleResourceOwnerAuthRequestPost(HttpRequest request) async {
     assert(request.method == 'POST');
 
     final postParams = await QueryParams.fromBody(request);
+    assert(postParams != null);
 
     // Check the username and password
 
@@ -852,9 +1027,11 @@ Future<void> handleResourceOwnerAuthRequestPost(HttpRequest request) async {
 
     tmpCred.verified(owner);
 
-    print('  approved by resource owner ${owner.username}'
-        ' for temporary credential=${tmpCred.identifier}');
-    print('  verifier for client to present: ${tmpCred.verifier}');
+    if (Verbosity.quiet.index < options.verbosity.index) {
+      print('  approved by resource owner ${owner.username}'
+          ' for temporary credential=${tmpCred.identifier}');
+      print('  verifier for client to present: ${tmpCred.verifier}');
+    }
 
     // Produce the response that returns the verifier to the client
     // (either directly via the callback the client provided when it asked for
@@ -895,7 +1072,7 @@ code {
 <body>
 <h1>Authorization successful</h1>
 
-<p>Please provide the <em>${tmpCred.client.description}</em>
+<p>Please provide the <em>${tmpCred.client.name}</em>
 client this PIN: <code>${tmpCred.verifier}</code></p>
 </body>
 </html>
@@ -928,16 +1105,21 @@ Future<void> handleTokenRequest(HttpRequest request) async {
   // credential) and that the verifier is correct for that temporary
   // credential.
 
-  final authorizationHeader = _getAuthorizationHeader(request.headers);
-  final auth = oauth1.AuthorizationHeaderParser(authorizationHeader);
-  print('  verifier=${auth.verifier} for temporary credential=${auth.token}');
+  final auth = await _getOAuthParams(request);
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('  temporary credential=${auth.token} verifier=${auth.verifier}'
+        ' using ${auth.signatureMethod}');
+  }
 
-  final client = ClientInfo.lookup(auth.clientKey);
+  final client = ClientInfo.lookup(auth.clientIdentifier);
 
   final tmpCred = TemporaryCredentialInfo.lookup(auth.token);
 
   auth.validate(request.method, request.requestedUri.toString(),
-      client.apiSecret, tmpCred.secret);
+      client.credentials, tmpCred.secret,
+      debugBaseString: dumpBaseString);
+
+  checkNonce(auth);
 
   if (tmpCred.verifier != auth.verifier) {
     // Incorrect verifier
@@ -946,16 +1128,20 @@ Future<void> handleTokenRequest(HttpRequest request) async {
     // will be accepted as a substitute for the correct value.
     // TODO: remove
 
-    if (auth.verifier != 'backdoor') {
-      throw BadRequestException('wrong verifier');
-    } else {
+    if (options.allowBackdoor && auth.verifier == 'backdoor') {
       // This is only for testing. Do not use in any production system!
+      // It automatically authorizes the temporary credential (by the first
+      // resource owner in the list) and treats the verifier as being correct.
+      // To make testing quicker, this saves the tester from manually logging
+      // into the server to authorize the request.
       print('  WARNING: treating verifier as correct even though it is not');
-      tmpCred.verified(ResourceOwnerInfo.lookup('armstrong'));
+      tmpCred.verified(resourceOwners.first);
+    } else {
+      throw BadRequestException('wrong verifier');
     }
   }
 
-  if (tmpCred.client.apiKey != client.apiKey) {
+  if (tmpCred.client.credentials.identifier != client.credentials.identifier) {
     throw BadRequestException('temporary credential does not belong to client');
   }
   if (tmpCred.state != TmpCredState.verified) {
@@ -967,9 +1153,11 @@ Future<void> handleTokenRequest(HttpRequest request) async {
 
   tmpCred.used(); // mark the temporary credential as used
 
-  final AccessToken accessToken = AccessToken(tmpCred.approver);
+  final TokenCredential accessToken = TokenCredential(client, tmpCred.approver);
 
-  print('  issued access token: ${accessToken.identifier}');
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('  issued access token: ${accessToken.identifier}');
+  }
 
   // Produce response with the access token
 
@@ -991,28 +1179,42 @@ Future<void> handleTokenRequest(HttpRequest request) async {
 //----------------------------------------------------------------
 /// Handler for the protected resource.
 ///
-/// This is the resource the client is ultimately trying to access, but needs
-/// to go through the OAuth process to obtain an access token to be able to
-/// access it.
+/// This is the access-restricted resource the client is ultimately trying to
+/// access, but needs to go through the OAuth process to obtain an access token
+/// to be able to access it.
 
 Future<void> handleExampleResource(HttpRequest request) async {
   // From the OAuth header, get the client and access token and validate the
   // signature.
 
-  final authorizationHeader = _getAuthorizationHeader(request.headers);
-  final authHead = oauth1.AuthorizationHeaderParser(authorizationHeader);
+  final auth = await _getOAuthParams(request);
 
-  final client = ClientInfo.lookup(authHead.clientKey);
+  final client = ClientInfo.lookup(auth.clientIdentifier);
 
-  final accessToken = AccessToken.lookup(authHead.token);
-  print('  access token=${authHead.token} from client=${client.description}');
+  final accessToken = TokenCredential.lookup(auth.token);
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('  access token=${auth.token} using ${auth.signatureMethod}');
+  }
 
-  authHead.validate(request.method, request.requestedUri.toString(),
-      client.apiSecret, accessToken.secret);
+  auth.validate(request.method, request.requestedUri.toString(),
+      client.credentials, accessToken.secret,
+      debugBaseString: dumpBaseString);
+
+  checkNonce(auth);
+
+  if (accessToken.client.credentials.identifier !=
+      client.credentials.identifier) {
+    // Section 3.2 of RFC5849 says "the server MAY choose to restrict token
+    // usage to the client to which it was issued".
+    // Some implementations of a server might not treat this as an error.
+    throw BadRequestException('access token does not belong to client');
+  }
 
   // Success: allow access to the resource.
 
-  print('  access allowed');
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('  access allowed');
+  }
 
   // Produce response
 
@@ -1021,7 +1223,7 @@ Future<void> handleExampleResource(HttpRequest request) async {
   response.headers.contentType = ContentType('application', 'json');
   response.write('{"title":"Protected resource",'
       ' "owner":"${accessToken.resourceOwner.username},'
-      ' "being-accessed-by":"${client.description}"}');
+      ' "being-accessed-by":"${client.name}"}');
   response.close();
 }
 
@@ -1055,22 +1257,22 @@ td {
 <body>
 <h1>OAuth1 Example Server</h1>
 
-<h2>OAuth API</h2>
+<h2>OAuth1 endpoints</h2>
 
-<p>OAuth1 clients need to be configured to use these URIs, and the
-API key and API secret that has been assigned to it.</p>
+<p>OAuth1 clients need to be configured to use these URI endpoints, and have
+client credentials that are recognised by this server.</p>
 
 <table class="details">
 <tr>
-  <th>Temporary Credential Request URI</th>
+  <th>Temporary Credential Request</th>
   <td>http://$host:$port$tmpCredentialRequestUrl</td>
 </tr>
 <tr>
-  <th>Resource Owner Authorization URI</th>
+  <th>Resource Owner Authorization</th>
   <td>http://$host:$port$resourceOwnerAuthUrl</td>
 </tr>
 <tr>
-  <th>Token Request URI</th>
+  <th>Token Request</th>
   <td>http://$host:$port$tokenRequestUrl</td>
 </tr>
 </table>
@@ -1082,33 +1284,234 @@ API key and API secret that has been assigned to it.</p>
   resp.close();
 }
 
+//################################################################
+// Command line parsing
+
+/// Verbosity level for information printed.
+///
+/// Default = 1; quiet = 0; verbose = 2;
+
+enum Verbosity { quiet, normal, verbose, debug }
+
+//----------------
+
+class Arguments {
+  /// Constructor from command line arguments
+
+  Arguments(List<String> args) {
+    try {
+      programName = Platform.script.pathSegments.last.replaceAll('.dart', '');
+
+      final parser = ArgParser(allowTrailingOptions: true)
+        ..addFlag('backdoor',
+            abbr: 'B',
+            help: 'enable backdoor verifier (for use with example_client.dart)',
+            negatable: false)
+        ..addFlag('debug',
+            abbr: 'D', help: 'show debug information', negatable: false)
+        ..addFlag('quiet',
+            abbr: 'q', help: 'show less information', negatable: false)
+        ..addFlag('verbose',
+            abbr: 'v', help: 'show more information', negatable: false)
+        ..addFlag('help',
+            abbr: 'h', help: 'show this help message', negatable: false);
+
+      final results = parser.parse(args);
+
+      programName = results.name ?? programName;
+
+      // Help flag
+
+      if (results['help']) {
+        print('Usage: $programName [options] {client-credential-files');
+        print(parser.usage);
+        exit(0);
+      }
+
+      allowBackdoor = results['backdoor'];
+
+      // Level of output
+
+      if (results['debug']) {
+        verbosity = Verbosity.debug;
+      } else if (results['verbose']) {
+        verbosity = Verbosity.verbose;
+      } else if (results['quiet']) {
+        verbosity = Verbosity.quiet;
+      } else {
+        verbosity = Verbosity.normal;
+      }
+
+      // Remaining arguments are filenames for client credentials
+
+      for (final filename in results.rest) {
+        if (Verbosity.verbose.index < verbosity.index) {
+          print('Loading client credentials from "$filename"');
+        }
+        _loadCredentialsFromFile(filename);
+      }
+    } on FormatException catch (e) {
+      stderr.write('Usage error: $programName: ${e.message}\n');
+      exit(2);
+    }
+  }
+
+  //================================================================
+  // Members
+
+  String programName;
+
+  bool allowBackdoor = false;
+
+  Verbosity verbosity = Verbosity.normal;
+
+  //================================================================
+  // Methods
+
+  //----------------------------------------------------------------
+  /// Loads client credentials from a file.
+  ///
+  /// The file may contain zero or more of the following:
+  ///
+  /// - client identity (property name "oauth_consumer_key")
+  /// - shared secret (property name "secret")
+  /// - RSA public key (must be in PEM format)
+  ///
+  /// It must not contain a private key, since an OAuth1 server should not have
+  /// access to the client's private key.
+
+  void _loadCredentialsFromFile(String filename) {
+    try {
+      String name = filename; // defaults to filename if no "name" in file
+      String identity; // client's identity
+      String sharedSecret;
+      String publicKeyText;
+
+      // Parse the file
+
+      int mode = 0;
+      StringBuffer buf;
+
+      var lineNum = 0;
+      for (final line in File(filename).readAsLinesSync()) {
+        lineNum++;
+        if (mode == 0) {
+          // Normal mode
+          if (line.trim().isEmpty || line.trim().startsWith('#')) {
+            // comment or blank line: ignore
+          } else if (line.startsWith('-----BEGIN RSA PUBLIC KEY-----')) {
+            mode = 1; // start capturing lines
+            buf = StringBuffer(line)..write('\n');
+          } else {
+            final pair = line.split(':');
+            if (pair.length == 2) {
+              final key = pair[0].trim();
+              final value = pair[1].trim();
+              switch (key) {
+                case 'name':
+                  name = value;
+                  break;
+                case 'oauth_consumer_key':
+                  identity = value;
+                  break;
+                case 'secret':
+                  sharedSecret = value;
+                  break;
+
+                default:
+                  stderr.write('$filename: $lineNum: unknown name: $name\n');
+                  exit(1);
+              }
+            } else if (line.contains('BEGIN RSA PRIVATE KEY')) {
+              stderr.write(
+                  '$filename: $lineNum: private key (servers shouldn\'t have client\'s private key)\n');
+              exit(1);
+            } else {
+              stderr.write('$filename: $lineNum: unexpected line: $line\n');
+              exit(1);
+            }
+          }
+        } else if (mode == 1) {
+          // Reading private key
+          buf..write(line)..write('\n');
+          if (line.startsWith('-----END RSA PUBLIC KEY-----')) {
+            mode = 0; // finished public key
+            publicKeyText = buf.toString();
+            buf = null;
+          }
+        }
+      }
+
+      if (mode != 0) {
+        stderr.write('$filename: error: incomplete: missing end of key\n');
+        exit(1);
+      }
+
+      // Check file contained the necessary information
+
+      if (identity == null) {
+        stderr.write('$filename: error: no "oauth_consumer_key" in file\n');
+        exit(1);
+      }
+      if (sharedSecret == null && publicKeyText == null) {
+        stderr.write('$filename: error: no "secret" or public key in file\n');
+        exit(1);
+      }
+
+      // Register the client in the server
+
+      registeredClients.add(ClientInfo(name, identity,
+          sharedSecret: sharedSecret, pemPublicKey: publicKeyText));
+    } catch (e) {
+      stderr.write('$filename: $e\n');
+      exit(1);
+    }
+  }
+}
+
 //================================================================
 
-Future<void> main() async {
+//----------------------------------------------------------------
+
+Future<void> main(List<String> arguments) async {
+  // Command line processing
+
+  options = Arguments(arguments);
+
   // Output some information about this example server
 
-  print('''OAuth1 Server
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('''OAuth1 Server
 ============
 
 This server knows about these clients:''');
 
-  for (final c in registeredClients) {
-    print('  ${c.description}:');
-    print('    API key: ${c.apiKey}');
-    print('    API secret: ${c.apiSecret}');
-  }
+    for (final c in registeredClients) {
+      print('  ${c.name}:');
+      print('    Client identity: ${c.credentials.identifier}');
+      if (c.credentials.sharedSecret != null) {
+        print('      Shared secret: ${c.credentials.sharedSecret}');
+      }
+      if (c.credentials.publicKey != null) {
+        final usage = (c.credentials.sharedSecret != null)
+            ? 'is supported for'
+            : 'must be used by';
+        print('         Public key: yes (RSA-SHA1 $usage this client)');
+      }
+    }
 
-  print('\nAnd these resource owners:');
+    print('\nAnd these resource owners:');
 
-  for (final owner in resourceOwners) {
-    print('  Username: ${owner.username}  password: ${owner.password}');
-  }
-  print('''
+    for (final owner in resourceOwners) {
+      print('  Username: ${owner.username}  password: ${owner.password}');
+    }
+    print('''
 
 Please run the example client like this:
 
   dart example_client.dart -s http://$host:$port
 ''');
+  }
 
   // Run the HTTP server
 

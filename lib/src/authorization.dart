@@ -2,11 +2,11 @@ library authorization;
 
 import 'dart:async';
 import 'package:http/http.dart' as http;
+import 'package:oauth1/oauth1.dart';
 
 import 'credentials.dart';
 import 'client_credentials.dart';
 import 'platform.dart';
-import 'authorization_header_builder.dart';
 import 'authorization_response.dart';
 
 /// A proxy class describing OAuth 1.0 redirection-based authorization.
@@ -30,23 +30,29 @@ class Authorization {
   /// Obtain a set of temporary credentials from the server.
   /// http://tools.ietf.org/html/rfc5849#section-2.1
   ///
-  /// If not callbackURI passed, authentication becomes PIN-based.
+  /// The [callbackURI] is optional. If provided, it must be a URI for the
+  /// callback's endpoint, or the value must be "oob" (case significant)
+  /// indicating the verifier will be communicated to the client via an
+  /// out-of-band mechanism. If the _callBackURI_ is omitted, it defaults to
+  /// "oob", which usually means the server shows the resource owner a PIN
+  /// to manually enter into the client.
+
   Future<AuthorizationResponse> requestTemporaryCredentials(
       [String callbackURI]) async {
-    callbackURI ??= 'oob';
-    final Map<String, String> additionalParams = <String, String>{
-      'oauth_callback': callbackURI
-    };
-    final AuthorizationHeaderBuilder ahb = AuthorizationHeaderBuilder();
-    ahb.signatureMethod = _platform.signatureMethod;
-    ahb.clientCredentials = _clientCredentials;
-    ahb.method = 'POST';
-    ahb.url = _platform.temporaryCredentialsRequestURI;
-    ahb.additionalParameters = additionalParams;
+    // TODO: allow optional parameters to be included in the request
+    // Since section 2.1 of RFC5849 says "servers MAY specify additional
+    // parameters".
+
+    final AuthorizationHeader auth = AuthorizationHeader.empty();
+    auth[AuthorizationHeader.oauth_version] = AuthorizationHeader.version;
+    auth[AuthorizationHeader.oauth_callback] = callbackURI ?? 'oob';
+
+    auth.sign('POST', _platform.temporaryCredentialsRequestURI,
+        _clientCredentials, _platform.signatureMethod);
 
     final http.Response res = await _httpClient.post(
         _platform.temporaryCredentialsRequestURI,
-        headers: <String, String>{'Authorization': ahb.build().toString()});
+        headers: <String, String>{'Authorization': auth.headerValue()});
 
     if (res.statusCode != 200) {
       throw StateError(res.body);
@@ -54,7 +60,9 @@ class Authorization {
 
     final Map<String, String> params = Uri.splitQueryString(res.body);
     if (params['oauth_callback_confirmed'].toLowerCase() != 'true') {
-      throw StateError('oauth_callback_confirmed must be true');
+      // Note: this is probably more forgiving that the specification intended.
+      // The specification does not say "TRUE" is permitted as a response.
+      throw StateError('oauth_callback_confirmed must be "true"');
     }
 
     return AuthorizationResponse.fromMap(params);
@@ -73,20 +81,17 @@ class Authorization {
   /// http://tools.ietf.org/html/rfc5849#section-2.3
   Future<AuthorizationResponse> requestTokenCredentials(
       Credentials tokenCredentials, String verifier) async {
-    final Map<String, String> additionalParams = <String, String>{
-      'oauth_verifier': verifier
-    };
-    final AuthorizationHeaderBuilder ahb = AuthorizationHeaderBuilder();
-    ahb.signatureMethod = _platform.signatureMethod;
-    ahb.clientCredentials = _clientCredentials;
-    ahb.credentials = tokenCredentials;
-    ahb.method = 'POST';
-    ahb.url = _platform.tokenCredentialsRequestURI;
-    ahb.additionalParameters = additionalParams;
+    final AuthorizationHeader auth = AuthorizationHeader.empty();
+    auth[AuthorizationHeader.oauth_version] = '1.0';
+    auth[AuthorizationHeader.oauth_verifier] = verifier;
+
+    auth.sign('POST', _platform.tokenCredentialsRequestURI, _clientCredentials,
+        _platform.signatureMethod,
+        tokenCredentials: tokenCredentials);
 
     final http.Response res = await _httpClient.post(
         _platform.tokenCredentialsRequestURI,
-        headers: <String, String>{'Authorization': ahb.build().toString()});
+        headers: <String, String>{'Authorization': auth.headerValue()});
 
     if (res.statusCode != 200) {
       throw StateError(res.body);

@@ -15,7 +15,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:encrypt/encrypt.dart';
 import 'package:oauth1/oauth1.dart' as oauth1;
+import 'package:pointycastle/asymmetric/api.dart';
 
 // Dart Linter overrides
 // ignore_for_file: always_specify_types
@@ -39,8 +41,62 @@ const String restrictedResourceUrl = '/1.1/statuses/home_timeline.json';
 
 // Default client credentials
 
-const defaultApiKey = 'LLDeVY0ySvjoOVmJ2XgBItvTV';
-const defaultApiSecret = 'JmEpkWXXmY7BYoQor5AyR84BD2BiN47GIBUPXn3bopZqodJ0MV';
+const defaultClientIdentity = 'LLDeVY0ySvjoOVmJ2XgBItvTV';
+const defaultSecret = 'JmEpkWXXmY7BYoQor5AyR84BD2BiN47GIBUPXn3bopZqodJ0MV';
+
+const defaultPrivateKey = '''
+-----BEGIN RSA PRIVATE KEY-----
+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
+-----END RSA PRIVATE KEY-----
+''';
 
 //################################################################
 // Command line parsing
@@ -50,20 +106,38 @@ class Arguments {
     programName = Platform.script.pathSegments.last.replaceAll('.dart', '');
 
     final parser = ArgParser(allowTrailingOptions: true)
-      ..addOption('credentials', abbr: 'c', help: 'client credentials file')
       ..addOption('server',
           abbr: 's', help: 'base server URI', defaultsTo: defaultServerUri)
+      ..addOption('credentials', abbr: 'c', help: 'client credentials file')
+      ..addOption('client',
+          abbr: 'C',
+          help: 'client identity (a.k.a. oauth_consumer_key or API key)')
+      ..addFlag('rsa-sha1',
+          abbr: 'r',
+          help: 'sign with RSA-SHA1 signature method (default: HMAC-SHA1)',
+          negatable: false)
+      ..addFlag('plaintext',
+          abbr: 'p',
+          help: 'sign with PLAINTEXT signature method (default: HMAC-SHA1)',
+          negatable: false)
       ..addOption('temp-uri',
-          abbr: 'T', help: 'temporary credential request URI')
+          abbr: 'T', help: 'URI for temporary credential request *')
       ..addOption('auth-uri',
-          abbr: 'R', help: 'resource owner authorization URI')
-      ..addOption('token-uri', abbr: 'A', help: 'access token request URI')
-      ..addOption('protected-uri', abbr: 'P', help: 'protected resource URI')
+          abbr: 'R', help: 'URI for resource owner authorization *')
+      ..addOption('token-uri',
+          abbr: 'A', help: 'URI for access token request *')
+      ..addOption('protected-uri',
+          abbr: 'P', help: 'URI for the protected resource *')
+      ..addFlag('backdoor',
+          abbr: 'B',
+          help: 'use backdoor verifier (only for the example_server.dart)',
+          negatable: false)
       ..addFlag('debug',
           abbr: 'D', help: 'show debug information', negatable: false)
       ..addFlag('verbose',
-          abbr: 'v', help: 'show extra information', negatable: false)
-      ..addFlag('help', abbr: 'h', help: 'show this message', negatable: false);
+          abbr: 'v', help: 'show more information', negatable: false)
+      ..addFlag('help',
+          abbr: 'h', help: 'show this help message', negatable: false);
 
     try {
       final results = parser.parse(args);
@@ -72,25 +146,43 @@ class Arguments {
 
       // Help flag
 
-      if (_boolOption(results, 'help', false)) {
+      if (results['help']) {
         print('Usage: $programName [options]');
         print(parser.usage);
+        print('* defaults to paths relative to the base server URI.');
         exit(0);
       }
 
-      // Configuration file option
+      // Signature method
+
+      if (results['rsa-sha1']) {
+        signatureMethod = oauth1.SignatureMethods.rsaSha1;
+      } else if (results['plaintext']) {
+        signatureMethod = oauth1.SignatureMethods.plaintext;
+      } else {
+        signatureMethod = oauth1.SignatureMethods.hmacSha1; // default
+      }
+
+      // Credentials file option
+
+      final keyParser = RSAKeyParser();
 
       final credentialFile = _stringOption(results, 'credentials');
       if (credentialFile == null) {
-        apiKey = defaultApiKey;
-        apiSecret = defaultApiSecret;
+        clientIdentity = defaultClientIdentity;
+        sharedSecret = defaultSecret;
+        privateKey = keyParser.parse(defaultPrivateKey);
       } else {
-        // TODO: implement loading client credentials from a file
-        throw UnimplementedError(); // will be needed when using RSA keys
+        _loadCredentialsFromFile(keyParser, credentialFile);
+      }
+      final c = _stringOption(results, 'client');
+      if (c != null) {
+        clientIdentity = c;
       }
 
-      debug = _boolOption(results, 'debug', false);
-      verbose = _boolOption(results, 'verbose', false);
+      useBackdoor = results['backdoor'];
+      debug = results['debug'];
+      verbose = results['verbose'];
 
       final serverUri = _stringOption(results, 'server', defaultServerUri);
 
@@ -122,27 +214,18 @@ class Arguments {
   String uriTokenRequest;
   String uriProtectedResource;
 
-  String apiKey; // client's identity
-  String apiSecret; // client's shared secret (for use with HMAC-SHA1)
-  String privateKey; // client's private key (for use with RSA-SHA1)
+  oauth1.SignatureMethod signatureMethod;
 
+  String clientIdentity; // client's identity
+  String sharedSecret; // client's shared secret (for HMAC-SHA1 or PLAINTEXT)
+  RSAPrivateKey privateKey; // client's private key (for RSA-SHA1)
+
+  bool useBackdoor;
   bool debug;
   bool verbose;
 
   //================================================================
   // Methods
-
-  //----------------------------------------------------------------
-
-  bool _boolOption(ArgResults results, String optionName, [bool defaultValue]) {
-    final Object flag = results[optionName];
-    if (flag is bool) {
-      return flag;
-    } else {
-      assert(flag == null);
-      return defaultValue;
-    }
-  }
 
   //----------------------------------------------------------------
 
@@ -154,6 +237,100 @@ class Arguments {
     } else {
       assert(value == null);
       return defaultValue;
+    }
+  }
+
+  //----------------------------------------------------------------
+  /// Loads client credentials from a file.
+  ///
+  /// The file may contain zero or more of the following:
+  ///
+  /// - client identity (property name "oauth_consumer_key")
+  /// - shared secret (property name "secret")
+  /// - RSA private key (must be in PEM format)
+  ///
+  /// It is OK for there to be no client identity in the file, since it can
+  /// alternatively be provided as a command line option.
+
+  void _loadCredentialsFromFile(RSAKeyParser keyParser, String filename) {
+    try {
+      // Parse the file
+
+      int mode = 0; // 0=normal, 1=reading-private-key, 2=reading-public-key
+      StringBuffer buf;
+      var seenPublicKey = false;
+
+      var lineNum = 0;
+      for (final line in File(filename).readAsLinesSync()) {
+        lineNum++;
+        if (mode == 0) {
+          // Normal mode
+          if (line.trim().isEmpty || line.trim().startsWith('#')) {
+            // comment or blank line: ignore
+          } else if (line.startsWith('-----BEGIN RSA PRIVATE KEY-----')) {
+            mode = 1; // start capturing lines
+            buf = StringBuffer(line)..write('\n');
+          } else {
+            final pair = line.split(':');
+            if (pair.length == 2) {
+              final name = pair[0].trim();
+              final value = pair[1].trim();
+              switch (name) {
+                case 'name':
+                  // Names are not used in the client
+                  break;
+                case 'oauth_consumer_key':
+                  clientIdentity = value;
+                  break;
+                case 'secret':
+                  sharedSecret = value;
+                  break;
+
+                default:
+                  stderr.write('$filename: $lineNum: unknown name: $name\n');
+                  exit(1);
+              }
+            } else if (line.contains('BEGIN RSA PUBLIC KEY')) {
+              mode = 2;
+            } else {
+              stderr.write('$filename: $lineNum: unexpected line: $line\n');
+              exit(1);
+            }
+          }
+        } else if (mode == 1) {
+          // Reading private key
+          buf..write(line)..write('\n');
+          if (line.startsWith('-----END RSA PRIVATE KEY-----')) {
+            mode = 0; // finished private key
+            privateKey = keyParser.parse(buf.toString());
+            buf = null;
+          }
+        } else if (mode == 2) {
+          // Reading public key (and discarding it)
+          if (line.startsWith('-----END RSA PUBLIC KEY-----')) {
+            mode = 0; // finished public key
+            seenPublicKey = true;
+          }
+        }
+      }
+
+      if (mode != 0) {
+        stderr.write('$filename: error: incomplete: missing end of key\n');
+        exit(1);
+      }
+
+      // Check file contained the necessary information
+
+      if (sharedSecret == null && privateKey == null) {
+        stderr.write('$filename: error: no "secret" or private key in file\n');
+        if (seenPublicKey) {
+          stderr.write('  The file has a public key, but no private key.\n');
+        }
+        exit(1);
+      }
+    } catch (e) {
+      stderr.write('$filename: $e\n');
+      exit(1);
     }
   }
 }
@@ -170,6 +347,7 @@ Future<void> threeLeggedOAuth(
     oauth1.SignatureMethod signatureMethod,
     String protectedResourceUri,
     {bool verbose,
+    bool useBackdoor,
     bool debug}) async {
   //----------------
   // Step 1: request temporary credentials from the server
@@ -204,11 +382,21 @@ Future<void> threeLeggedOAuth(
 
   // This client obtains the verifier (PIN)
 
-  stdout.write('PIN: ');
-  final String verifier = stdin.readLineSync();
-  if (verifier == null) {
-    stderr.write('aborted\n');
-    exit(1);
+  String verifier;
+
+  if (!useBackdoor) {
+    stdout.write('PIN: ');
+    verifier = stdin.readLineSync();
+    if (verifier == null || verifier.isEmpty) {
+      stderr.write('aborted\n');
+      exit(1);
+    }
+  } else {
+    // This is to make it easy to test with the example_client.dart. It uses
+    // a verifier that automatically makes the temporary token approved, without
+    // having to visit the Web page. Obviously, a production server should not
+    // have any backdoors!
+    verifier = 'backdoor';
   }
 
   //----------------
@@ -252,29 +440,40 @@ Future<void> main(List<String> arguments) async {
 
   final args = Arguments(arguments);
 
-  // Define the platform (i.e. the server)
+  try {
+    // Define the platform (i.e. the server)
 
-  final oauth1.Platform platform = oauth1.Platform(
-      args.uriTemporaryCredentialRequest,
-      args.uriResourceOwnerAuthorization,
-      args.uriTokenRequest,
-      oauth1.SignatureMethods.hmacSha1);
+    final oauth1.Platform platform = oauth1.Platform(
+        args.uriTemporaryCredentialRequest,
+        args.uriResourceOwnerAuthorization,
+        args.uriTokenRequest,
+        args.signatureMethod);
 
-  // Define the credentials for this client (i.e. the identity previously
-  // established by the client with the server, plus the shared secret
-  // for HMAC-SHA1 or RSA private key for RSA-SHA1).
+    // Define the credentials for this client (i.e. the identity previously
+    // established by the client with the server, plus the shared secret
+    // for HMAC-SHA1 or RSA public and private keys for RSA-SHA1).
 
-  final oauth1.ClientCredentials clientCredentials =
-      oauth1.ClientCredentials(args.apiKey, args.apiSecret);
+    final oauth1.ClientCredentials clientCredentials = oauth1.ClientCredentials(
+        args.clientIdentity, args.sharedSecret,
+        privateKey: args.privateKey);
 
-  // Create Authorization object with client credentials and the platform
+    // Create Authorization object with client credentials and the platform
 
-  final oauth1.Authorization auth =
-      oauth1.Authorization(clientCredentials, platform);
+    final oauth1.Authorization auth =
+        oauth1.Authorization(clientCredentials, platform);
 
-  // Use the Authorization object to perform three-legged-OAuth
+    // Use the Authorization object to perform three-legged-OAuth
 
-  await threeLeggedOAuth(clientCredentials, auth,
-      oauth1.SignatureMethods.hmacSha1, args.uriProtectedResource,
-      verbose: args.verbose, debug: args.debug);
+    await threeLeggedOAuth(clientCredentials, auth, args.signatureMethod,
+        args.uriProtectedResource,
+        verbose: args.verbose,
+        useBackdoor: args.useBackdoor,
+        debug: args.debug);
+  } catch (e) {
+    if (args.verbose) {
+      rethrow;
+    }
+    stderr.write('Error: $e\n');
+    exit(1);
+  }
 }

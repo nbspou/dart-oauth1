@@ -3,10 +3,30 @@ OAuth1
 
 [![Build Status](https://travis-ci.org/nbspou/dart-oauth1.svg?branch=fork/nbspou)](https://travis-ci.org/nbspou/dart-oauth1)
 
-Library for implementing OAuth1 clients and servers according to OAuth 1a
-as defined by [RFC 5849: The OAuth 1.0 Protocol][rfc5849].
+Library for implementing OAuth1 clients and servers as defined by [RFC
+5849: The OAuth 1.0 Protocol][rfc5849].  The RFC 5849 was publishined
+in 2010, and it addresses errata on the 2009 [OAuth Core 1.0 Revision
+A](https://oauth.net/core/1.0a/) (also known as OAuth1a) which was a
+revision of the 2007 specification.
 
-Currently only HMAC-SHA1 is supported.
+All the signature methods in OAuth 1.0 are supported:
+
+- HMAC-SHA1;
+- RSA-SHA1; and
+- PLAINTEXT
+
+This library can be used to implement 3-legged-OAuth, as defined in
+the first part of RFC 5849. This is where:
+
+- the _client_ obtains a _temporary credential_ from the _server_;
+- the _resource owner_ authorizes the _server_ to grant the client's
+  access request (as identified by the _temporary credential_);
+- the _client_ uses the _tempoary credential_ to request a set of
+  _token credentials_ from the _server_; and
+- the _client_ accesses protected resources by presenting the _token
+  credential_.
+
+
 
 Usage
 -----
