@@ -1,21 +1,64 @@
 OAuth1
-===========
+======
 
 [![Build Status](https://travis-ci.org/nbspou/dart-oauth1.svg?branch=fork/nbspou)](https://travis-ci.org/nbspou/dart-oauth1)
 
-"[RFC 5849: The OAuth 1.0 Protocol][rfc5849]" client implementation for dart
+OAuth1 library for implementing OAuth1 clients and OAuth1 servers.
 
-Usage
------
+## Supported features
 
-Add to `pubspec.yaml`:
+### OAuth 1.0a protocol
 
-```yaml
-dependencies:
-  oauth1: ^1.0.4
-```
+This library supports OAuth 1.0 as defined by [RFC 5849: The OAuth 1.0
+Protocol][rfc5849].
 
-Please use like below.
+The RFC 5849 was published in 2010. It addresses errata on the
+_OAuth Core 1.0 Revision A_ (also known as OAuth1a) that was published
+in 2009. That was a revision of the earlier 2007 specification. This
+library does not support OAuth 2.0.
+
+### Signature methods
+
+All the signature methods defined in RFC 5849 are supported:
+
+- HMAC-SHA1;
+- RSA-SHA1; and
+- PLAINTEXT
+
+### Three-legged-OAuth and two-legged-OAuth
+
+This library can be used to implement three-legged-OAuth, as defined
+in the first part of RFC 5849. This is where there are three parties
+involved: the client, the resource owner and the server.
+
+1. The _client_ obtains a _temporary credential_ from the _server_;
+2. The _resource owner_ authorizes the _server_ to grant the client's
+  access request (as identified by the _temporary credential_);
+3. The _client_ uses the _temporary credential_ to request a
+  _token credential_ from the _server_; and
+4. The _client_ accesses protected resources by presenting the _token
+  credential_.
+
+It can also be used to implement two-legged-OAuth, which only
+involves two parties: the client and the server. The client sends a
+single request for the protected resource and the server responds with
+it.
+
+## Usage
+
+### OAuth1 client
+
+This library can be used to sign an OAuth1 request. The signed OAuth1
+protocol parameters can then be added to a HTTP request and sent to an
+OAuth1 server.
+
+Usually, the OAuth1 protocol parameters are sent in a HTTP
+"Authorization" header. This library provides a method to format the
+parameters for that header. But (less commonly) the parameters can
+also be sent as URI query parameters and/or in the body of the HTTP
+request.
+
+Here is an example of an OAuth1 client performing three-legged-OAuth:
 
 ```dart
 import 'dart:io';
@@ -63,9 +106,36 @@ void main() {
     print("Your screen name is " + res.optionalParameters['screen_name']);
   });
 }
-
 ```
 
-In addition, You should save and load the granted token credentials from your drive. Of cource, you don't need to authorize when you did it.
+Once the access token has been obtained, it may be used for multiple
+requests.  The client may find it useful to save the access token for
+future use, so it does not have to go through the three-legged-OAuth
+process again. But the usefulness of that will depend on the policy of
+the server and if access tokens expire or not.
+
+An expanded version of the above code appears in the
+_example_client.dart_ example.
+
+### OAuth1 server
+
+An OAuth1 server is a HTTP server that implements the endpoints for
+processing OAuth1 requests and for accessing the protected resources.
+
+If it implements the three-legged-OAuth protocol, it needs to issues
+and manages both temporary credentials and access tokens.  If it
+implements the two-legged-OAuth protocol, it only needs to implement
+the endpoints for the protected resources (there are no _temporary
+credentials_ nor _access tokens_ involved).
+
+
+This library can be used to parse the information in an OAuth1 HTTP
+request and validate the signature. If the signature is valid, then
+the server can use the information from the request to perform the
+task of the endpoint.
+
+See the _example_server.dart_ for an example of using the library to
+create a three-legged-OAuth1 server.
+
 
 [rfc5849]: http://tools.ietf.org/html/rfc5849

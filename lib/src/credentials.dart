@@ -2,12 +2,22 @@ library credentials;
 
 import 'dart:convert';
 
-/// A class describing OAuth credentials except for client credential
+import 'package:oauth1/oauth1.dart';
+
+/// Temporary credentials or token credentials.
+///
+/// This class is used to represent _temporary credentials_ (also known as an
+/// "authorization request") and _token credentials_ (also known as an
+/// "access token" or "access grant").
+///
+/// The third type of OAuth credentials, _client credentials_, are not
+/// represented by this class, but by the [ClientCredentials] class.
+
 class Credentials {
   final String _token;
   final String _tokenSecret;
 
-  Credentials(this._token, this._tokenSecret);
+  const Credentials(this._token, this._tokenSecret);
   factory Credentials.fromMap(Map<String, String> parameters) {
     if (!parameters.containsKey('oauth_token')) {
       throw ArgumentError("params doesn't have a key 'oauth_token'");
