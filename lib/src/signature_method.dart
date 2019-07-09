@@ -10,13 +10,17 @@ import 'package:pointycastle/asymmetric/api.dart';
 import 'package:oauth1/oauth1.dart';
 
 //################################################################
-/// A class abstracting Signature Method.
+/// Implementation of a signature method.
+///
+/// Instances of this class are used to implement particular signature methods.
+///
 /// http://tools.ietf.org/html/rfc5849#section-3.4
 ///
-/// OAuth1 clients and OAuth1 servers are expected to use the standard
-/// [SignatureMethod] objects from [SignatureMethods]. In particular,
-/// [SignatureMethods.hmacSha1], [SignatureMethods.rsaSha1] and
-/// [[SignatureMethods.plaintext].
+/// The library provides instances of this class for the standard OAuth
+/// signature methods:
+/// - [SignatureMethods.hmacSha1];
+/// - [SignatureMethods.rsaSha1]; and
+/// - [SignatureMethods.plaintext].
 
 class SignatureMethod {
   //================================================================
@@ -47,12 +51,12 @@ class SignatureMethod {
   /// Creates a signature.
   ///
   /// Returns the signature of the [signatureBaseString] when signed using the
-  /// [clientCredentials]. The [tokenSecret] may be null.
+  /// [clientCredentials] and (if provided) the [tokenSecret].
   ///
   /// Throws an [ArgumentError] if the client credentials are not suitable
-  /// for the signature method. That is, for HMAC-SHA1 and PLAINTEXT, the
-  /// client credentials must have a shared secret; and for RSA-SHA1, the client
-  /// credentials must have an RSA private key.
+  /// for the signature method. For example, if using HMAC-SHA1 and PLAINTEXT
+  /// and the client credentials doesn't have a shared secret; or if using
+  /// RSA-SHA1 and the client credentials doesn't have an RSA private key.
 
   String sign(String signatureBaseString, ClientCredentials clientCredentials,
           [String tokenSecret]) =>
@@ -64,16 +68,17 @@ class SignatureMethod {
   /// Returns true if the [signature] is valid, otherwise false.
   ///
   /// The signature is valid if it is a valid signature of the
-  /// [signatureBaseString] when validated with the [clientCredentials].
-  /// The [tokenSecret] may be null.
+  /// [signatureBaseString] when validated with the [clientCredentials] and
+  /// (if provided) the [tokenSecret].
   ///
   /// Throws an [ArgumentError] if the client credentials are not suitable
-  /// for the signature method. That is, for HMAC-SHA1 and PLAINTEXT, the
-  /// client credentials must have a shared secret; and for RSA-SHA1, the client
-  /// credentials must have an RSA public key.
+  /// for the signature method. For example, if using HMAC-SHA1 and PLAINTEXT
+  /// and the client credentials doesn't have a shared secret; or if using
+  /// RSA-SHA1 and the client credentials doesn't have an RSA public key.
 
   bool validate(String signature, String signatureBaseString,
-          ClientCredentials clientCredentials, String tokenSecret) =>
+          ClientCredentials clientCredentials,
+          [String tokenSecret]) =>
       _validate(signature, signatureBaseString, clientCredentials, tokenSecret);
 }
 

@@ -1,5 +1,5 @@
-# Consumer public credentials for RSA-SHA1
-# For the OAuth1 server.
+# Consumer credentials for RSA-SHA1
+# For use with the OAuth1 server.
 
 name: Tester with RSA key pair
 oauth_consumer_key: yyFT8nBLP4ZXPA2BsTMQxwkw6BfL2LJj

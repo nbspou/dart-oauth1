@@ -114,11 +114,11 @@ class Arguments {
           help: 'client identity (a.k.a. oauth_consumer_key or API key)')
       ..addFlag('rsa-sha1',
           abbr: 'r',
-          help: 'sign with RSA-SHA1 signature method (default: HMAC-SHA1)',
+          help: 'use RSA-SHA1 signature method (default: HMAC-SHA1)',
           negatable: false)
       ..addFlag('plaintext',
           abbr: 'p',
-          help: 'sign with PLAINTEXT signature method (default: HMAC-SHA1)',
+          help: 'use PLAINTEXT signature method (default: HMAC-SHA1)',
           negatable: false)
       ..addOption('temp-uri',
           abbr: 'T', help: 'URI for temporary credential request *')
@@ -126,11 +126,11 @@ class Arguments {
           abbr: 'R', help: 'URI for resource owner authorization *')
       ..addOption('token-uri',
           abbr: 'A', help: 'URI for access token request *')
-      ..addOption('protected-uri',
-          abbr: 'P', help: 'URI for the protected resource *')
+      ..addFlag('two-legged-oauth',
+          abbr: '2', help: 'use 2-legged-OAuth', negatable: false)
       ..addFlag('backdoor',
           abbr: 'B',
-          help: 'use backdoor verifier (only for the example_server.dart)',
+          help: 'use backdoor verifier (for example_server only)',
           negatable: false)
       ..addFlag('debug',
           abbr: 'D', help: 'show debug information', negatable: false)
@@ -147,9 +147,9 @@ class Arguments {
       // Help flag
 
       if (results['help']) {
-        print('Usage: $programName [options]');
+        print('Usage: $programName [options] {resourceURIs*}\nOptions:');
         print(parser.usage);
-        print('* defaults to paths relative to the base server URI.');
+        print('* defaults to hard-coded URIs relative to the base server URI.');
         exit(0);
       }
 
@@ -162,6 +162,8 @@ class Arguments {
       } else {
         signatureMethod = oauth1.SignatureMethods.hmacSha1; // default
       }
+
+      threeLegged = !results['two-legged-oauth'];
 
       // Credentials file option
 
@@ -196,8 +198,13 @@ class Arguments {
       uriTokenRequest =
           _stringOption(results, 'token-uri', '$serverUri$tokenRequestUrl');
 
-      uriProtectedResource = _stringOption(
-          results, 'protected-uri', '$serverUri$restrictedResourceUrl');
+      if (results.rest.isEmpty) {
+        // No protected resource URIs provided: use the default
+        uriProtectedResources = ['$serverUri$restrictedResourceUrl'];
+      } else {
+        // Use all the remaining arguments as URIs for protected resources
+        uriProtectedResources = results.rest;
+      }
     } on FormatException catch (e) {
       stderr.write('Usage error: $programName: ${e.message}\n');
       exit(2);
@@ -212,9 +219,10 @@ class Arguments {
   String uriTemporaryCredentialRequest;
   String uriResourceOwnerAuthorization;
   String uriTokenRequest;
-  String uriProtectedResource;
+  List<String> uriProtectedResources;
 
   oauth1.SignatureMethod signatureMethod;
+  bool threeLegged;
 
   String clientIdentity; // client's identity
   String sharedSecret; // client's shared secret (for HMAC-SHA1 or PLAINTEXT)
@@ -342,13 +350,24 @@ class Arguments {
 /// which is then used to access a protected resource.
 
 Future<void> threeLeggedOAuth(
+    String uriTemporaryCredentialRequest,
+    String uriResourceOwnerAuthorization,
+    String uriTokenRequest,
     oauth1.ClientCredentials clientCredentials,
-    oauth1.Authorization auth,
     oauth1.SignatureMethod signatureMethod,
-    String protectedResourceUri,
+    Iterable<String> protectedResourceUris,
     {bool verbose,
     bool useBackdoor,
     bool debug}) async {
+  final oauth1.Platform platform = oauth1.Platform(
+      uriTemporaryCredentialRequest,
+      uriResourceOwnerAuthorization,
+      uriTokenRequest,
+      signatureMethod);
+
+  final oauth1.Authorization auth =
+      oauth1.Authorization(clientCredentials, platform);
+
   //----------------
   // Step 1: request temporary credentials from the server
   //
@@ -412,25 +431,68 @@ Future<void> threeLeggedOAuth(
   if (debug) {
     print('OAuth 1a access token credentials:\n  ${res2.credentials}');
   }
+  // NOTE: you can get optional values from AuthorizationResponse object
+  final name = res2.optionalParameters['screen_name'];
+  print('Access token was authorized by "$name"');
 
   //----------------
   // Step 4: use the access token to access protected resources
 
+  _accessProtectedResources(
+      signatureMethod, clientCredentials, protectedResourceUris,
+      verbose: verbose, accessToken: res2.credentials);
+}
+
+//----------------
+/// Send HTTP requests for all the protected resource URIs.
+///
+/// This method is used by both the three-legged-OAuth (where the [accessToken]
+/// is required, and the two-legged-OAuth (where it is not provided).
+
+Future<void> _accessProtectedResources(
+    oauth1.SignatureMethod signatureMethod,
+    oauth1.ClientCredentials clientCredentials,
+    Iterable<String> protectedResourceUris,
+    {oauth1.Credentials accessToken,
+    bool verbose}) async {
   final oauth1.Client client =
-      oauth1.Client(signatureMethod, clientCredentials, res2.credentials);
+      oauth1.Client(signatureMethod, clientCredentials, accessToken);
 
-  // now you can access to protected resources via client
+  // Send requests to each of the protected resource URIs
 
-  final res3 = await client.get(protectedResourceUri);
+  for (final resourceUri in protectedResourceUris) {
+    final response = await client.get(resourceUri);
 
-  if (verbose) {
-    print('Body of protected resource:\n  ${res3.body}');
+    if (verbose) {
+      print('Body from $resourceUri:\n${response.body}');
+    }
+
+    if (HttpStatus.ok <= response.statusCode && response.statusCode < 300) {
+      print('Success: $resourceUri: status=${response.statusCode}');
+    } else {
+      stderr.write('Error: $resourceUri: status=${response.statusCode}\n');
+      exit(1);
+    }
   }
+}
 
-  // NOTE: you can get optional values from AuthorizationResponse object
-  final name = res2.optionalParameters['screen_name'];
+//----------------------------------------------------------------
+/// Two-legged-OAuth example.
+///
+/// Example of a client using two-legged-OAuth to access a protected resource.
 
-  print('\nSuccess: client has access to the protected resources of "$name".');
+Future<void> twoLeggedOAuth(
+    oauth1.ClientCredentials clientCredentials,
+    oauth1.SignatureMethod signatureMethod,
+    Iterable<String> protectedResourceUris,
+    {bool verbose,
+    bool debug}) async {
+  // Send a request using the client credentials to sign the request.
+  // No token required.
+
+  _accessProtectedResources(
+      signatureMethod, clientCredentials, protectedResourceUris,
+      verbose: verbose);
 }
 
 //----------------------------------------------------------------
@@ -441,14 +503,6 @@ Future<void> main(List<String> arguments) async {
   final args = Arguments(arguments);
 
   try {
-    // Define the platform (i.e. the server)
-
-    final oauth1.Platform platform = oauth1.Platform(
-        args.uriTemporaryCredentialRequest,
-        args.uriResourceOwnerAuthorization,
-        args.uriTokenRequest,
-        args.signatureMethod);
-
     // Define the credentials for this client (i.e. the identity previously
     // established by the client with the server, plus the shared secret
     // for HMAC-SHA1 or RSA public and private keys for RSA-SHA1).
@@ -457,18 +511,24 @@ Future<void> main(List<String> arguments) async {
         args.clientIdentity, args.sharedSecret,
         privateKey: args.privateKey);
 
-    // Create Authorization object with client credentials and the platform
+    if (args.threeLegged) {
+      // Define the platform (i.e. the server)
 
-    final oauth1.Authorization auth =
-        oauth1.Authorization(clientCredentials, platform);
-
-    // Use the Authorization object to perform three-legged-OAuth
-
-    await threeLeggedOAuth(clientCredentials, auth, args.signatureMethod,
-        args.uriProtectedResource,
-        verbose: args.verbose,
-        useBackdoor: args.useBackdoor,
-        debug: args.debug);
+      await threeLeggedOAuth(
+          args.uriTemporaryCredentialRequest,
+          args.uriResourceOwnerAuthorization,
+          args.uriTokenRequest,
+          clientCredentials,
+          args.signatureMethod,
+          args.uriProtectedResources,
+          verbose: args.verbose,
+          useBackdoor: args.useBackdoor,
+          debug: args.debug);
+    } else {
+      await twoLeggedOAuth(
+          clientCredentials, args.signatureMethod, args.uriProtectedResources,
+          verbose: args.verbose, debug: args.debug);
+    }
   } catch (e) {
     if (args.verbose) {
       rethrow;

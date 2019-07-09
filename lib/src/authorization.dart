@@ -10,10 +10,21 @@ import 'platform.dart';
 import 'authorization_response.dart';
 
 /// A proxy class describing OAuth 1.0 redirection-based authorization.
-/// http://tools.ietf.org/html/rfc5849#section-2
 ///
-/// Redirection works are responded to client.
-/// So you can do PIN-based authorization too if you want.
+/// Provides high-level methods for implementing the client-side of
+/// the three-legged-OAuth protocol as documented in
+/// [section 2 of RFC 5849](http://tools.ietf.org/html/rfc5849#section-2).
+///
+/// 1. Client requests a _temporary credential_ from the server using
+///    [requestTemporaryCredentials].
+/// 2. The client asks the _resource owner_ to visit the resource owner
+///    authorization URI, obtained using [getResourceOwnerAuthorizationURI].
+/// 3. If the resource owner authorizes the request, the client receives a
+///    verifier code; either via a callback or by an out-of-bands mechanism.
+/// 4. The client presents the verifier and temporary token to the server,
+///    to obtain a _token credential_ [requestTokenCredentials].
+/// 5. The client uses the token credential to access protected resources.
+
 class Authorization {
   final ClientCredentials _clientCredentials;
   final Platform _platform;
@@ -41,13 +52,14 @@ class Authorization {
       [String callbackURI]) async {
     // TODO: allow optional parameters to be included in the request
     // Since section 2.1 of RFC5849 says "servers MAY specify additional
-    // parameters".
+    // parameters". This applies to the other high-level methods too.
 
-    final AuthorizationHeader auth = AuthorizationHeader.empty();
-    auth[AuthorizationHeader.oauth_version] = AuthorizationHeader.version;
-    auth[AuthorizationHeader.oauth_callback] = callbackURI ?? 'oob';
+    final AuthorizationRequest auth = AuthorizationRequest();
+    auth.set(AuthorizationRequest.oauth_version,
+        AuthorizationRequest.supportedVersion); // optional
+    auth.set(AuthorizationRequest.oauth_callback, callbackURI ?? 'oob');
 
-    auth.sign('POST', _platform.temporaryCredentialsRequestURI,
+    auth.sign('POST', Uri.parse(_platform.temporaryCredentialsRequestURI),
         _clientCredentials, _platform.signatureMethod);
 
     final http.Response res = await _httpClient.post(
@@ -60,7 +72,7 @@ class Authorization {
 
     final Map<String, String> params = Uri.splitQueryString(res.body);
     if (params['oauth_callback_confirmed'].toLowerCase() != 'true') {
-      // Note: this is probably more forgiving that the specification intended.
+      // Note: this is more forgiving that the specification intended.
       // The specification does not say "TRUE" is permitted as a response.
       throw StateError('oauth_callback_confirmed must be "true"');
     }
@@ -81,12 +93,13 @@ class Authorization {
   /// http://tools.ietf.org/html/rfc5849#section-2.3
   Future<AuthorizationResponse> requestTokenCredentials(
       Credentials tokenCredentials, String verifier) async {
-    final AuthorizationHeader auth = AuthorizationHeader.empty();
-    auth[AuthorizationHeader.oauth_version] = '1.0';
-    auth[AuthorizationHeader.oauth_verifier] = verifier;
+    final AuthorizationRequest auth = AuthorizationRequest();
+    auth.set(AuthorizationRequest.oauth_version,
+        AuthorizationRequest.supportedVersion);
+    auth.set(AuthorizationRequest.oauth_verifier, verifier);
 
-    auth.sign('POST', _platform.tokenCredentialsRequestURI, _clientCredentials,
-        _platform.signatureMethod,
+    auth.sign('POST', Uri.parse(_platform.tokenCredentialsRequestURI),
+        _clientCredentials, _platform.signatureMethod,
         tokenCredentials: tokenCredentials);
 
     final http.Response res = await _httpClient.post(

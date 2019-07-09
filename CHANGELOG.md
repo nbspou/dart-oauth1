@@ -1,7 +1,8 @@
 
-## 1.1.0-alpha
+## 2.0.0-alpha
 - Added support for implementing OAuth1 servers.
 - Implemented RSA-SHA1 signature method.
+- Fixed support for signing parameters with multiple values.
 
 ## 1.0.3
 - Confirm compatibility with package http 0.12.0

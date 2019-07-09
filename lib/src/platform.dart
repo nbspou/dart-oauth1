@@ -3,7 +3,9 @@ library platform;
 import 'signature_method.dart';
 
 /// Configuration of OAuth1Authorization.
+///
 /// http://tools.ietf.org/html/rfc5849
+
 class Platform {
   final String _temporaryCredentialsRequestURI;
   final String _resourceOwnerAuthorizationURI;

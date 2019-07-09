@@ -49,10 +49,11 @@ import 'package:oauth1/oauth1.dart' as oauth1;
 //----------------------------------------------------------------
 // The host and port this server will listen on
 
-const String host = 'localhost';
 final InternetAddress address = InternetAddress.loopbackIPv6;
-const bool noV4 = false; // false so loopbackIPv6 is both IPv6 and IPv4 loopback
 const int port = 8080;
+
+// Upper limit on the size of the HTTP request body.
+const int _maxBodyLength = 1024 * 10;
 
 //----------------------------------------------------------------
 // Paths for the URIs implementing the OAuth1 protocol and protected resource
@@ -177,7 +178,9 @@ class AccessTokenUnknown implements Exception {
   final String id;
 
   @override
-  String toString() => 'Access token unknown: $id';
+  String toString() => id != null
+      ? 'Access token unknown: $id'
+      : 'Access token was not provided';
 }
 
 class AccessTokenExpired implements Exception {
@@ -597,8 +600,8 @@ void generateErrorResponse(Object exception, HttpResponse resp) {
     }
   } else if (exception is BadAuthException) {
     _errorAuth(exception.message, resp);
-  } else if (exception is oauth1.ValidationException) {
-    _errorAuth('Signature invalid', resp);
+  } else if (exception is oauth1.BadOAuth) {
+    _errorAuth('Invalid request: $exception', resp);
   } else if (exception is BadRequestException) {
     _errorHtml(HttpStatus.badRequest, 'Bad request: $exception', resp);
   } else if (exception is WrongLogin) {
@@ -651,7 +654,7 @@ void _errorAuth(String message, HttpResponse resp) {
   resp.statusCode = HttpStatus.unauthorized;
   resp.headers.contentType = ContentType('application', 'json');
 
-  const realm = 'http://$host:$port';
+  final realm = 'http://${hostname(address)}:$port';
 
   resp.headers.add('www-authenticate', 'OAuth realm="$realm');
   resp.write('{"errors":[{"message": "could not authenticate"}]\n');
@@ -661,6 +664,13 @@ void _errorAuth(String message, HttpResponse resp) {
 
 //################################################################
 // Utility classes and functions
+
+//----------------------------------------------------------------
+/// Convert the address the server is listening on to a value that can be
+/// used as the hostname in a URI.
+
+String hostname(InternetAddress address) =>
+    (address.isLoopback) ? 'localhost' : address.host;
 
 //----------------------------------------------------------------
 /// Query parameters
@@ -762,43 +772,45 @@ class QueryParams {
 //----------------------------------------------------------------
 /// Extracts parameters from an HTTP request.
 
-Future<oauth1.AuthorizationHeader> _getOAuthParams(HttpRequest request) async {
-  final auth = oauth1.AuthorizationHeader.empty();
+Future<oauth1.AuthorizationRequest> _getOAuthRequest(
+    HttpRequest request) async {
+  // Get www-form-urlencoded body, if any
 
-  //--------
-  // Populate from any query parameters of the HTTP request URI
-  // Note: Query components can have multiple values for the same name
+  String urlEncodedBody;
 
-  final queryParams = QueryParams.fromQueryString(request.requestedUri.query);
-  auth.addAll(queryParams.values);
+  final ContentType contentType = request.headers.contentType;
+  if (contentType != null &&
+      contentType.mimeType == 'application/x-www-form-urlencoded') {
+    // Request has a Content-Type header and it is the expected mime-type
 
-  //--------
-  // Populate from any "Authorization" header(s)
-
-  for (final headerValue in request.headers['authorization']) {
-    final isOAuthHeader = auth.addFromAuthorizationHeader(headerValue);
-
-    if (Verbosity.verbose.index < options.verbosity.index) {
-      print('${isOAuthHeader ? '' : 'Ignoring: '}$headerValue');
+    final bodyBytes = <int>[];
+    await for (final Iterable<int> bytes in request) {
+      if (_maxBodyLength < bodyBytes.length + bytes.length) {
+        throw BadRequestException('body too large');
+      }
+      bodyBytes.addAll(bytes);
     }
+
+    if (contentType.charset != 'utf8') {
+      throw FormatException('unsupported charset: ${contentType.charset}');
+    }
+
+    urlEncodedBody = utf8.decode(bodyBytes, allowMalformed: false);
   }
 
-  //--------
-  // Populate from any form parameters
+  // Extract all the parameters that are signed by OAuth1 from:
+  // - query parameters in the URI
+  // - OAuth authorization headers
+  // - www-form-urlencoded body
 
-  final postParams = await QueryParams.fromBody(request);
-  if (postParams != null) {
-    auth.addAll(postParams.values);
-  }
-
-  //--------
-  // Return result
+  final params = oauth1.AuthorizationRequest.fromHttpRequest(request.method,
+      request.requestedUri, request.headers['authorization'], urlEncodedBody);
 
   if (Verbosity.normal.index < options.verbosity.index) {
-    print(auth);
+    print(params);
   }
 
-  return auth;
+  return params;
 }
 
 //----------------------------------------------------------------
@@ -810,7 +822,7 @@ Future<oauth1.AuthorizationHeader> _getOAuthParams(HttpRequest request) async {
 //  request (the server MAY reject requests with stale timestamps as
 //  described in Section 3.3).
 
-void checkNonce(oauth1.AuthorizationHeader auth) {
+void checkNonce(oauth1.AuthorizationRequest auth) {
   if (auth.signatureMethod == oauth1.SignatureMethods.hmacSha1.name ||
       auth.signatureMethod == oauth1.SignatureMethods.rsaSha1.name) {
     final nonce = auth.nonce;
@@ -832,24 +844,6 @@ void checkNonce(oauth1.AuthorizationHeader auth) {
   }
 }
 
-//----------------------------------------------------------------
-/// Debug method for showing the _signature base string_ when validating.
-///
-/// The _signature base string_ is the value that is signed. It is created from
-/// the authorization header parameters and the signature produced from it.
-/// This value is normally never seen by the application, but it is useful
-/// to know what it is when debugging OAuth1 implementations. A signature is
-/// invalid if the _signature base strings_ are different, the credentials are
-/// different or the signing method has a bug. Knowing what the _signature base
-/// string_ is can help isolate the problem. Otherwise, the signature validation
-/// process is a black box that either works or not.
-
-void dumpBaseString(String signatureBaseString) {
-  if (Verbosity.verbose.index < options.verbosity.index) {
-    print('  Signature base string: $signatureBaseString');
-  }
-}
-
 //################################################################
 // The HTTP request handlers
 
@@ -865,23 +859,21 @@ Future<void> handleTmpCredentialsRequest(HttpRequest request) async {
   // From the OAuth header, identify the client and validate the header was
   // signed by that client.
 
-  final auth = await _getOAuthParams(request);
+  final oauthRequest = await _getOAuthRequest(request);
 
-  final client = ClientInfo.lookup(auth.clientIdentifier);
+  final client = ClientInfo.lookup(oauthRequest.clientIdentifier);
   if (Verbosity.quiet.index < options.verbosity.index) {
     print(
-        '  request from client="${client.name}" using ${auth.signatureMethod}');
+        '  request from client="${client.name}" using ${oauthRequest.signatureMethod}');
   }
 
-  auth.validate(
-      request.method, request.requestedUri.toString(), client.credentials, null,
-      debugBaseString: dumpBaseString);
+  oauthRequest.validate(client.credentials); // no token secret for this request
 
-  checkNonce(auth);
+  checkNonce(oauthRequest);
 
   // Get the callback the client has indicated it wants to use
 
-  final callback = auth.callback;
+  final callback = oauthRequest.callback;
 
   if (callback == null) {
     throw BadRequestException('oauth_callback missing');
@@ -1105,30 +1097,28 @@ Future<void> handleTokenRequest(HttpRequest request) async {
   // credential) and that the verifier is correct for that temporary
   // credential.
 
-  final auth = await _getOAuthParams(request);
+  final oauthRequest = await _getOAuthRequest(request);
   if (Verbosity.quiet.index < options.verbosity.index) {
-    print('  temporary credential=${auth.token} verifier=${auth.verifier}'
-        ' using ${auth.signatureMethod}');
+    print('  temporary credential=${oauthRequest.token}'
+        ' verifier=${oauthRequest.verifier}'
+        ' using ${oauthRequest.signatureMethod}');
   }
 
-  final client = ClientInfo.lookup(auth.clientIdentifier);
+  final client = ClientInfo.lookup(oauthRequest.clientIdentifier);
 
-  final tmpCred = TemporaryCredentialInfo.lookup(auth.token);
+  final tmpCred = TemporaryCredentialInfo.lookup(oauthRequest.token);
 
-  auth.validate(request.method, request.requestedUri.toString(),
-      client.credentials, tmpCred.secret,
-      debugBaseString: dumpBaseString);
+  oauthRequest.validate(client.credentials, tmpCred.secret);
 
-  checkNonce(auth);
+  checkNonce(oauthRequest);
 
-  if (tmpCred.verifier != auth.verifier) {
+  if (tmpCred.verifier != oauthRequest.verifier) {
     // Incorrect verifier
     //
     // Normally this is ALWAYS an error. But for testing, the backdoor value
-    // will be accepted as a substitute for the correct value.
-    // TODO: remove
+    // may be accepted as a substitute for the correct value.
 
-    if (options.allowBackdoor && auth.verifier == 'backdoor') {
+    if (options.allowBackdoor && oauthRequest.verifier == 'backdoor') {
       // This is only for testing. Do not use in any production system!
       // It automatically authorizes the temporary credential (by the first
       // resource owner in the list) and treats the verifier as being correct.
@@ -1187,28 +1177,48 @@ Future<void> handleExampleResource(HttpRequest request) async {
   // From the OAuth header, get the client and access token and validate the
   // signature.
 
-  final auth = await _getOAuthParams(request);
+  final oauthRequest = await _getOAuthRequest(request);
 
-  final client = ClientInfo.lookup(auth.clientIdentifier);
+  final client = ClientInfo.lookup(oauthRequest.clientIdentifier);
 
-  final accessToken = TokenCredential.lookup(auth.token);
-  if (Verbosity.quiet.index < options.verbosity.index) {
-    print('  access token=${auth.token} using ${auth.signatureMethod}');
+  String info;
+
+  if ((!options.allowTwoLegged) || oauthRequest.token != null) {
+    // Must use three-legged-OAuth or the client is using it anyway.
+    // The client MUST present a valid access token and the request is valid.
+
+    final accessToken = TokenCredential.lookup(oauthRequest.token);
+    if (Verbosity.quiet.index < options.verbosity.index) {
+      print('  access token=${oauthRequest.token}'
+          ' using ${oauthRequest.signatureMethod}');
+    }
+
+    if (accessToken.client.credentials.identifier !=
+        client.credentials.identifier) {
+      // Section 3.2 of RFC5849 says "the server MAY choose to restrict token
+      // usage to the client to which it was issued".
+      // Some implementations of a server might not treat this as an error.
+      throw BadRequestException('access token does not belong to client');
+    }
+
+    oauthRequest.validate(client.credentials, accessToken.secret);
+
+    info = ' resourceOwner="${accessToken.resourceOwner.username}"';
+  } else {
+    // Two-legged-OAuth: there is no token.
+    // Just validating the client had signed the request is sufficient.
+
+    if (Verbosity.quiet.index < options.verbosity.index) {
+      print('  two-legged-OAuth request from ${client.name}'
+          ' using ${oauthRequest.signatureMethod}');
+    }
+
+    oauthRequest.validate(client.credentials);
+
+    info = '';
   }
 
-  auth.validate(request.method, request.requestedUri.toString(),
-      client.credentials, accessToken.secret,
-      debugBaseString: dumpBaseString);
-
-  checkNonce(auth);
-
-  if (accessToken.client.credentials.identifier !=
-      client.credentials.identifier) {
-    // Section 3.2 of RFC5849 says "the server MAY choose to restrict token
-    // usage to the client to which it was issued".
-    // Some implementations of a server might not treat this as an error.
-    throw BadRequestException('access token does not belong to client');
-  }
+  checkNonce(oauthRequest);
 
   // Success: allow access to the resource.
 
@@ -1221,8 +1231,7 @@ Future<void> handleExampleResource(HttpRequest request) async {
   final response = request.response;
 
   response.headers.contentType = ContentType('application', 'json');
-  response.write('{"title":"Protected resource",'
-      ' "owner":"${accessToken.resourceOwner.username},'
+  response.write('{"title":"Protected resource",$info'
       ' "being-accessed-by":"${client.name}"}');
   response.close();
 }
@@ -1265,15 +1274,15 @@ client credentials that are recognised by this server.</p>
 <table class="details">
 <tr>
   <th>Temporary Credential Request</th>
-  <td>http://$host:$port$tmpCredentialRequestUrl</td>
+  <td>http://${hostname(address)}:$port$tmpCredentialRequestUrl</td>
 </tr>
 <tr>
   <th>Resource Owner Authorization</th>
-  <td>http://$host:$port$resourceOwnerAuthUrl</td>
+  <td>http://${hostname(address)}:$port$resourceOwnerAuthUrl</td>
 </tr>
 <tr>
   <th>Token Request</th>
-  <td>http://$host:$port$tokenRequestUrl</td>
+  <td>http://${hostname(address)}:$port$tokenRequestUrl</td>
 </tr>
 </table>
 
@@ -1303,10 +1312,10 @@ class Arguments {
       programName = Platform.script.pathSegments.last.replaceAll('.dart', '');
 
       final parser = ArgParser(allowTrailingOptions: true)
+        ..addFlag('two-legged-oauth',
+            abbr: '2', help: 'allow two-legged-OAuth', negatable: false)
         ..addFlag('backdoor',
-            abbr: 'B',
-            help: 'enable backdoor verifier (for use with example_client.dart)',
-            negatable: false)
+            abbr: 'B', help: 'enable backdoor verifier', negatable: false)
         ..addFlag('debug',
             abbr: 'D', help: 'show debug information', negatable: false)
         ..addFlag('quiet',
@@ -1323,10 +1332,13 @@ class Arguments {
       // Help flag
 
       if (results['help']) {
-        print('Usage: $programName [options] {client-credential-files');
+        print(
+            'Usage: $programName [options] {client_credential_files}\nOptions:');
         print(parser.usage);
         exit(0);
       }
+
+      allowTwoLegged = results['two-legged-oauth'];
 
       allowBackdoor = results['backdoor'];
 
@@ -1360,6 +1372,8 @@ class Arguments {
   // Members
 
   String programName;
+
+  bool allowTwoLegged;
 
   bool allowBackdoor = false;
 
@@ -1471,8 +1485,6 @@ class Arguments {
 
 //================================================================
 
-//----------------------------------------------------------------
-
 Future<void> main(List<String> arguments) async {
   // Command line processing
 
@@ -1480,11 +1492,14 @@ Future<void> main(List<String> arguments) async {
 
   // Output some information about this example server
 
-  if (Verbosity.quiet.index < options.verbosity.index) {
-    print('''OAuth1 Server
-============
+  final legs = options.allowTwoLegged
+      ? 'two-legged-OAuth and three-legged-OAuth'
+      : 'three-legged-OAuth only';
 
-This server knows about these clients:''');
+  if (Verbosity.quiet.index < options.verbosity.index) {
+    print('''OAuth1 Server (supports $legs)
+
+Clients that can request access this server:''');
 
     for (final c in registeredClients) {
       print('  ${c.name}:');
@@ -1500,22 +1515,22 @@ This server knows about these clients:''');
       }
     }
 
-    print('\nAnd these resource owners:');
+    print('\nResource owners who can authorize requests for access:');
 
     for (final owner in resourceOwners) {
-      print('  Username: ${owner.username}  password: ${owner.password}');
+      print('  Username: ${owner.username}; password: ${owner.password}');
     }
     print('''
 
 Please run the example client like this:
 
-  dart example_client.dart -s http://$host:$port
+  dart example_client.dart -s http://${hostname(address)}:$port
 ''');
   }
 
   // Run the HTTP server
 
-  final HttpServer server = await HttpServer.bind(address, port, v6Only: noV4);
+  final HttpServer server = await HttpServer.bind(address, port);
 
   await processHttpRequests(server);
 }
