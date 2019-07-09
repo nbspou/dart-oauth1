@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:oauth1/oauth1.dart' as prefix0;
 import 'package:test/test.dart';
 import 'package:oauth1/oauth1.dart';
 import 'package:encrypt/encrypt.dart';
@@ -23,7 +24,6 @@ void main() {
           '9d7dh3k39sjv7';
 
       final AuthorizationRequest req = AuthorizationRequest();
-      //auth.add('realm', 'Example'); // this won't appear in signature base string
       req.add(AuthorizationRequest.oauth_consumer_key, '9djdj82h48djs9d2');
       req.add(AuthorizationRequest.oauth_signature_method, 'HMAC-SHA1');
       req.add(AuthorizationRequest.oauth_nonce, '7d8f3e4a');
@@ -73,6 +73,103 @@ void main() {
           expect(e.signatureBaseString, equals(expectedSBS));
         }
       });
+    });
+
+    //----------------------------------------------------------------
+
+    test('example from section 3.4.1.3.2 of RFC 5849', () {
+      final AuthorizationRequest req = AuthorizationRequest();
+
+      req.addAll(Uri.splitQueryString('c2&a3=2+q').map(
+          (String name, String value) =>
+              MapEntry<String, List<String>>(name, [value])));
+
+      final String signatureBaseString = req.sign(
+          'POST',
+          Uri.parse(
+              'http://example.com/request?b5=%3D%253D&a3=a&c%40=&a2=r%20b'),
+          ClientCredentials('9djdj82h48djs9d2', 'secret'),
+          SignatureMethods.hmacSha1,
+          tokenCredentials:
+              const Credentials('kkk9d7dh3k39sjv7', 'anotherSecret'),
+          timestamp: 137131201,
+          nonce: '7d8f3e4a');
+
+      // Check fully decoded parameters match those shown in section 3.4.1.3.1.
+
+      expect(req.parameters['b5'].first, equals('=%3D'));
+      expect(req.parameters['a3'].contains('a'), isTrue);
+      expect(req.parameters['c@'].first, equals(''));
+      expect(req.parameters['a2'].first, equals('r b'));
+      expect(req.parameters['oauth_consumer_key'].first,
+          equals('9djdj82h48djs9d2'));
+      expect(req.parameters['oauth_token'].first, equals('kkk9d7dh3k39sjv7'));
+      expect(
+          req.parameters['oauth_signature_method'].first, equals('HMAC-SHA1'));
+      expect(req.parameters['oauth_timestamp'].first, equals('137131201'));
+      expect(req.parameters['oauth_nonce'].first, equals('7d8f3e4a'));
+      expect(req.parameters['c2'].first, equals(''));
+      expect(req.parameters['a3'].contains('2 q'), isTrue);
+      expect(req.parameters.length, equals(11));
+
+      const String expectedNormalizedParams =
+          'a2=r%20b&a3=2%20q&a3=a&b5=%3D%253D&c%40=&c2=&oauth_consumer_key=9dj'
+          'dj82h48djs9d2&oauth_nonce=7d8f3e4a&oauth_signature_method=HMAC-SHA1'
+          '&oauth_timestamp=137131201&oauth_token=kkk9d7dh3k39sjv7';
+
+      // Extract the normalized parameters part from the signature base string
+
+      final parts = signatureBaseString.split('&');
+      final String encoded = parts[2];
+      final List<int> bytes = <int>[];
+
+      int x = 0;
+      while (x < encoded.length) {
+        final int code = encoded.codeUnitAt(x);
+        if (code != 0x25) {
+          // not "%"
+          bytes.add(code);
+          x++;
+        } else {
+          // "%XX"
+          bytes.add(int.parse(encoded.substring(x + 1, x + 3), radix: 16));
+          x += 3;
+        }
+      }
+
+      final String decoded = String.fromCharCodes(bytes);
+
+      expect(decoded, equals(expectedNormalizedParams));
+    });
+
+    //----------------------------------------------------------------
+
+    test('encoding parameter values', () {
+      final AuthorizationRequest req = AuthorizationRequest();
+      req.set('example-asterisk', '_*_');
+      req.set('example-space', '_ _');
+      req.set('example-reserved', '_ABCDabcd0123456789-._~');
+      req.set('name-._~ _*_%_012345', 'names-are-encoded-too');
+
+      final String signatureBaseString = req.sign(
+          'post',
+          Uri.parse('HTTP://EXAMPLE.COM:80'),
+          ClientCredentials('tester', 'secret'),
+          SignatureMethods.plaintext,
+          timestamp: 1,
+          nonce: 'abcdefgh');
+
+      expect(
+          signatureBaseString,
+          equals('POST&http%3A%2F%2Fexample.com&'
+              'example-asterisk%3D_%252A_%26'
+              'example-reserved%3D_ABCDabcd0123456789-._~%26'
+              'example-space%3D_%2520_%26'
+              'name-._~%2520_%252A_%2525_012345%3Dnames-are-encoded-too%26'
+              'oauth_consumer_key%3Dtester%26'
+              'oauth_nonce%3Dabcdefgh%26'
+              'oauth_signature_method%3DPLAINTEXT%26'
+              'oauth_timestamp%3D1'));
     });
   });
 

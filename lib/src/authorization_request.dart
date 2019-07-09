@@ -11,8 +11,8 @@ import 'exceptions.dart';
 //################################################################
 /// Information in an OAuth request.
 ///
-/// Represents all the information that is signed by an OAuth signature (
-/// including the signature). This information consists of:
+/// Represents all the information that is signed by an OAuth signature, plus
+/// the signature. This information consists of:
 ///
 /// - the HTTP request method ("POST", "GET", etc.);
 /// - the requested URI; and
@@ -29,16 +29,25 @@ import 'exceptions.dart';
 /// one value, but other parameters may have multiple values for the same name.
 /// The name and values of parameters are both case-sensitive.
 ///
-/// http://tools.ietf.org/html/rfc5849#section-3.5.1
+/// An OAuth1 _client_ should create an empty [AuthorizationRequest()] and
+/// populate it with any non-OAuth protocol parameters from the body of the
+/// HTTP request (if there is one); and optionally the _oauth_version_ if it
+/// wants to transmit it. Then use the [sign] method to generate all the
+/// OAuth protocol parameters. Any query parameters in the URI passed to the
+/// _sign_ method are added to the signed parameters. The OAuth protocol
+/// parameters can then be included in the HTTP request. The most simplest way
+/// to do this is to use the [headerValue] and put that value into a HTTP
+/// "Authorization" header.
 ///
-/// An OAuth1 server should use [AuthorizationRequest.fromHttpRequest] to gather
-/// all the signed information from the HTTP request. The information is then
-/// used to identify the client and lookup the client credentials, and
+/// An OAuth1 _server_ should use [AuthorizationRequest.fromHttpRequest] to
+/// gather all the signed information from the HTTP request. The information is
+/// then used to identify the client and lookup the client credentials, and
 /// (depending on the endpoint) also identify and lookup temporary credentials
 /// or tokens.
 /// With the credentials, the signature from the request can be checked using
-/// the [validate] method. If the signature is valid, then the HTTP request can
-/// be processed.
+/// the [validate] method. If the signature is not valid, the HTTP request
+/// should be rejected and an error response produced, otherwise the HTTP
+/// request can be processed to produce a suitable response.
 
 class AuthorizationRequest {
   // Note: this class was previously called "AuthorizationHeader", but has been
@@ -217,9 +226,9 @@ class AuthorizationRequest {
   Map<String, List<String>> get parameters => _params;
 
   //----------------------------------------------------------------
-  /// Retrieves the values of a single named parameter.
+  /// Retrieves all the values of a named parameter.
   ///
-  /// Retrieves the values of the parameter named [name].
+  /// Retrieves all the values of the parameter named [name].
   ///
   /// Returns null if no values are set for the parameter.
 
@@ -229,17 +238,21 @@ class AuthorizationRequest {
   /// Retrieve all the OAuth protocol parameters for an Authorization header.
   ///
   /// Produces a value suitable for representing the OAuth protocol parameters
-  /// in an HTTP "Authorization" header.
+  /// in an HTTP "Authorization" header. An optional [realm] can be included.
+  ///
+  /// For example, it will produce a string that starts with:
+  ///
+  ///     OAuth realm="https://example.com", oauth_consumer_key="...", ...
   ///
   /// Only the OAuth protocol parameters (those starting with "oauth_") are
-  /// included. All other parameters are not included.
+  /// included. All other parameters are not included. The should be included
+  /// in the HTTP request by other means (i.e. as query parameters or in the
+  /// body).
   ///
   /// Throws a [StateError] if the header has not been signed, since it probably
   /// does not make sense to use an OAuth Authorization header that is not
   /// signed. If it is needed, get the OAuth protocol parameters using
   /// [oauthParams] to build the value.
-  ///
-  /// <https://tools.ietf.org/html/rfc5849#section-3.5.1>
 
   String headerValue({String realm}) {
     if (signature != null) {
@@ -374,7 +387,7 @@ class AuthorizationRequest {
   ///
   /// Note: OAuth defines the timestamp as the string representation of a
   /// positive integer. The value is usually the number of seconds since an
-  /// epoch, but it does not have to be that: section 3.3 of RFC5849 says the
+  /// epoch, but it does not have to be that: section 3.3 of RFC 5849 says the
   /// server documentation could define what it requires for the timestamp.
   ///
   /// Value is null if the `oauth_timestamp` parameter is not set.
@@ -396,7 +409,7 @@ class AuthorizationRequest {
   // Methods to set/modify the values
 
   //----------------------------------------------------------------
-  /// Sets a parameter to have a single value.
+  /// Sets a parameter to a single value.
   ///
   /// Sets the parameter named [name] to have a single [value]. If the parameter
   /// had any value or values, they are all discarded and replaced with just
@@ -407,7 +420,7 @@ class AuthorizationRequest {
   }
 
   //----------------------------------------------------------------
-  /// Adds a value to a parameter.
+  /// Adds a single value to a parameter.
   ///
   /// Add the [value] to the existing values of [name]. If there were no values
   /// for the parameter, the value becomes its first and only value. If there
@@ -430,9 +443,10 @@ class AuthorizationRequest {
   }
 
   //----------------------------------------------------------------
-  /// Adds a set of multiple values.
+  /// Adds a set of parameters.
   ///
   /// Adds all the parameters in [extra] to the existing parameters.
+  /// If a parameter already has value(s), the new values are added to them.
   ///
   /// Throws [MultiValueParameter] if the extra parameters contains multiple
   /// values for an OAuth protocol parameter, or contains one where a value
@@ -458,7 +472,7 @@ class AuthorizationRequest {
   }
 
   //----------------------------------------------------------------
-  /// Removes all values a parameter.
+  /// Removes all values of a parameter.
 
   void remove(String name) {
     _params.remove(name);
@@ -540,7 +554,7 @@ class AuthorizationRequest {
 
     if (version != null && version != supportedVersion) {
       // While oauth_version is optional, if present its value must be "1.0".
-      // (from Section 3.1 or RFC5849)
+      // (from Section 3.1 or RFC 5849)
       throw BadParameterValue('unsupported', oauth_version, version);
     }
 
@@ -549,7 +563,7 @@ class AuthorizationRequest {
       // Use current time as a timestamp
       timestampToUse = (DateTime.now().millisecondsSinceEpoch / 1000).floor();
     } else {
-      if (timestamp < 0) {
+      if (timestamp <= 0) {
         throw ArgumentError.value(timestamp, 'timestamp', 'must be a +ve int');
       }
       timestampToUse = timestamp; // use provided timestamp
@@ -605,7 +619,7 @@ class AuthorizationRequest {
   /// and the shared secret (which is why its argument is a _Credentials_
   /// instead of only the String shared secret).
   ///
-  /// Implements section 3.2 of RFC5849
+  /// Implements section 3.2 of RFC 5849
   /// <https://tools.ietf.org/html/rfc5849#section-3.2>, except for the scope
   /// and status of the token, if present.
   ///
@@ -623,7 +637,7 @@ class AuthorizationRequest {
     }
 
     //--------
-    // Check parameters are correct according to section 3.1 of RFC5849
+    // Check parameters are correct according to section 3.1 of RFC 5849
     // <https://tools.ietf.org/html/rfc5849#section-3.1>
     //
     // Note: these checks use the getters, which will throw a [MultipleValues]
@@ -702,7 +716,7 @@ class AuthorizationRequest {
   //----------------------------------------------------------------
   /// Calculate the signature base string.
   ///
-  /// The _signature base string_ is defined by section 3.4.1 of RFC5849.
+  /// The _signature base string_ is defined by section 3.4.1 of RFC 5849.
   /// <https://tools.ietf.org/html/rfc5849#section-3.4.1>
   ///
   /// It is consistent, reproducible concatenation of several of the HTTP
@@ -710,39 +724,34 @@ class AuthorizationRequest {
   /// "HMAC-SHA1" and "RSA-SHA1" signature methods.
 
   String _baseString() {
-    // Referred from https://dev.twitter.com/docs/auth/creating-signature
     assert(_method != null);
     assert(_urlWithoutQuery != null);
 
-    //
-    // Collecting parameters
-    //
+    // Normalize parameters (as described in section 3.4.1.3.2 of RFC 5849)
 
     // 1. Percent encode every key and value that will be signed.
     //
     // Note: if the URI has query parameters, they will have already been
     // included into _params. Any parameters from a urlencoded body will also
-    // have been already included into _params.
+    // have been already included into _params. Everything is in _params,
+    // includeing any "oauth_signature" which this code will skip.
 
     final Map<String, List<String>> encodedParams = <String, List<String>>{};
 
     _params.forEach((String k, List<String> values) {
-      // Every parameter is included, except for the oauth_signature itself
-      // (which would be present during validation of a signature).
-
       if (k != oauth_signature) {
         final List<String> encValues = <String>[];
 
         for (String v in values) {
-          encValues.add((v.isNotEmpty) ? Uri.encodeComponent(v) : '');
+          encValues.add((v.isNotEmpty) ? _percentEncode(v) : '');
         }
 
-        encodedParams[Uri.encodeComponent(k)] = encValues;
+        encodedParams[_percentEncode(k)] = encValues;
       }
     });
 
-    // 2. Sort the list of parameters alphabetically[1]
-    //    by encoded key[2].
+    // 2. Sort the encoded parameters by name (using ascending byte value)
+    //    and multiple values by value.
 
     for (final List<String> values in encodedParams.values) {
       values.sort(); // sort multiple values by their encoded value
@@ -756,12 +765,9 @@ class AuthorizationRequest {
     // 7. If there are more key/value pairs remaining,
     //    append a '&' character to the output string.
 
-    final String baseParams = sortedEncodedKeys.map((String k) {
+    final String normalizedParams = sortedEncodedKeys.map((String k) {
       final List<String> sortedValues = encodedParams[k];
-      sortedValues.sort();
       return sortedValues.map((String v) => '$k=$v').join('&');
-
-      //return '$k=${encodedParams[k]}';
     }).join('&');
 
     //
@@ -771,27 +777,80 @@ class AuthorizationRequest {
     final StringBuffer base = StringBuffer();
     // 1. Convert the HTTP Method to uppercase and set the
     //    output string equal to this value.
-    base.write(_method.toUpperCase());
+    base.write(_percentEncode(_method)); // note: already in uppercase
 
     // 2. Append the '&' character to the output string.
     base.write('&');
 
-    // 3. Percent encode the URL origin and path, and append it to the
-    //    output string.
+    // 3. Percent encode the _Base String URI_
+
+    final String schemeLC = _urlWithoutQuery.scheme.toLowerCase();
+    final String hostLC = _urlWithoutQuery.host.toLowerCase();
+    final String portStr = (schemeLC == 'http' && _urlWithoutQuery.port == 80 ||
+            schemeLC == 'https' && _urlWithoutQuery.port == 443)
+        ? ''
+        : ':${_urlWithoutQuery.port}';
+
     base.write(
-        Uri.encodeComponent(_urlWithoutQuery.origin + _urlWithoutQuery.path));
+        _percentEncode('$schemeLC://$hostLC$portStr${_urlWithoutQuery.path}'));
 
     // 4. Append the '&' character to the output string.
     base.write('&');
 
     // 5. Percent encode the parameter string and append it
     //    to the output string.
-    base.write(Uri.encodeComponent(baseParams.toString()));
+    base.write(_percentEncode(normalizedParams));
 
     // Return the base string
     //
     return base.toString();
   }
+
+  //----------------
+  // Percent encoding for signature base string from section 3.6 of RFC 5849.
+  //
+  // String is encoded as UTF-8: and safe characters are not encoded, but
+  // all other characters are percent encoded (with uppercase hex characters).
+  //
+  // Note: this is NOT the same as the percent encoding implemented by RFC3986,
+  // so the standard Uri.encode... methods cannot be used.
+
+  static final Map<int, bool> _notEncodedCharcodes =
+      Map<int, bool>.fromIterable(
+          'abcdefghijklmnopqrstuvwxyz'
+                  'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                  '0123456789'
+                  '-._~'
+              .codeUnits,
+          key: (dynamic c) => c,
+          value: (dynamic c) => true);
+
+  static const List<String> _hexDigits = [
+    '0',
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+    'A',
+    'B',
+    'C',
+    'D',
+    'E',
+    'F'
+  ];
+
+  static String _percentEncode(String str) => utf8.encode(str).map((int c) {
+        if (_notEncodedCharcodes.containsKey(c)) {
+          return String.fromCharCode(c);
+        } else {
+          return '%${_hexDigits[(c >> 4) & 0x0F]}${_hexDigits[c & 0x0F]}';
+        }
+      }).join();
 
   //----------------------------------------------------------------
   /// Generate a random string for use as a nonce.

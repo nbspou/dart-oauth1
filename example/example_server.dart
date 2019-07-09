@@ -306,7 +306,7 @@ enum TmpCredState { pendingVerification, verified, used, expired }
 
 /// Temporary credentials.
 ///
-/// See section 2 of RFC5849.
+/// See section 2 of RFC 5849.
 
 class TemporaryCredentialInfo {
   //================================================================
@@ -916,8 +916,8 @@ Future<void> handleTmpCredentialsRequest(HttpRequest request) async {
 /// page (e.g. by redirecting their browser) to authorize the request for
 /// access.
 ///
-/// Implements section 2.2 of RFC5849
-/// <https://tools.ietf.org/html/rfc5849#section-2.2>.
+/// Implements
+/// [section 2.2 of RFC 5849](https://tools.ietf.org/html/rfc5849#section-2.2).
 
 Future<void> handleResourceOwnerAuthRequest(HttpRequest request) async {
   assert(request.method == 'GET');
@@ -1086,8 +1086,8 @@ client this PIN: <code>${tmpCred.verifier}</code></p>
 /// the verifier (either via a callback or via an out-of-band mechanism) and
 /// now wants to exchange the temporary token for an access token.
 ///
-/// Implements section 2.3 of RFC5849
-/// <https://tools.ietf.org/html/rfc5849#section-2.3>.
+/// Implements
+/// [section 2.3 of RFC 5849])https://tools.ietf.org/html/rfc5849#section-2.3).
 
 Future<void> handleTokenRequest(HttpRequest request) async {
   assert(request.method == 'POST');
@@ -1195,7 +1195,7 @@ Future<void> handleExampleResource(HttpRequest request) async {
 
     if (accessToken.client.credentials.identifier !=
         client.credentials.identifier) {
-      // Section 3.2 of RFC5849 says "the server MAY choose to restrict token
+      // Section 3.2 of RFC5 849 says "the server MAY choose to restrict token
       // usage to the client to which it was issued".
       // Some implementations of a server might not treat this as an error.
       throw BadRequestException('access token does not belong to client');

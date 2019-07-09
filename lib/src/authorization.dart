@@ -51,7 +51,7 @@ class Authorization {
   Future<AuthorizationResponse> requestTemporaryCredentials(
       [String callbackURI]) async {
     // TODO: allow optional parameters to be included in the request
-    // Since section 2.1 of RFC5849 says "servers MAY specify additional
+    // Since section 2.1 of RFC 5849 says "servers MAY specify additional
     // parameters". This applies to the other high-level methods too.
 
     final AuthorizationRequest auth = AuthorizationRequest();
