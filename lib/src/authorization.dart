@@ -47,7 +47,7 @@ class Authorization {
 
     final http.Response res = await _httpClient.post(
         Uri.parse(_platform.temporaryCredentialsRequestURI),
-        headers: <String, String>{'Authorization': ahb.build().toString()});
+        headers: <String, String>{'Authorization': await ahb.build().encode()});
 
     if (res.statusCode != 200) {
       throw StateError(res.body);
@@ -88,7 +88,7 @@ class Authorization {
 
     final http.Response res = await _httpClient.post(
         Uri.parse(_platform.tokenCredentialsRequestURI),
-        headers: <String, String>{'Authorization': ahb.build().toString()});
+        headers: <String, String>{'Authorization': await ahb.build().encode()});
 
     if (res.statusCode != 200) {
       throw StateError(res.body);

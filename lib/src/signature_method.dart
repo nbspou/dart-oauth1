@@ -1,5 +1,6 @@
 library signature_method;
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
@@ -7,7 +8,7 @@ import 'package:crypto/crypto.dart';
 /// http://tools.ietf.org/html/rfc5849#section-3.4
 class SignatureMethod {
   final String _name;
-  final String Function(String key, String text) _sign;
+  final FutureOr<String> Function(String key, String text) _sign;
 
   /// A constructor of SignatureMethod.
   SignatureMethod(this._name, this._sign);
@@ -16,7 +17,7 @@ class SignatureMethod {
   String get name => _name;
 
   /// Sign data by key.
-  String sign(String key, String text) => _sign(key, text);
+  Future<String> sign(String key, String text) async => await _sign(key, text);
 }
 
 /// A abstract class contains Signature Methods.
