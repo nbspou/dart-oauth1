@@ -35,8 +35,7 @@ class AuthorizationHeader {
   ///
   /// You can add parameters by _authorizationHeader.
   /// (You can override too but I don't recommend.)
-  @override
-  String toString() {
+  Future<String> encode() async {
     final Map<String, String> params = <String, String>{};
 
     params['oauth_nonce'] = DateTime.now().millisecondsSinceEpoch.toString();
@@ -50,7 +49,7 @@ class AuthorizationHeader {
     }
     params.addAll(_additionalParameters!);
     if (!params.containsKey('oauth_signature')) {
-      params['oauth_signature'] = _createSignature(_method, _url, params);
+      params['oauth_signature'] = await _createSignature(_method, _url, params);
     }
 
     final String authHeader = 'OAuth ' +
@@ -77,7 +76,7 @@ class AuthorizationHeader {
 
   /// Create signature in ways referred from
   /// https://dev.twitter.com/docs/auth/creating-signature.
-  String _createSignature(
+  Future<String> _createSignature(
       String method, String url, Map<String, String> params) {
     // Referred from https://dev.twitter.com/docs/auth/creating-signature
     if (params.isEmpty) {

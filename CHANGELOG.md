@@ -1,3 +1,6 @@
+## 2.1.0
+- Change `SignatureMethod` to be asynchronous.
+
 ## 2.0.0
 - Migrate to null safety
 

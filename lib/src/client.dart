@@ -29,7 +29,7 @@ class Client extends http.BaseClient {
             httpClient != null ? httpClient : http.Client() as http.BaseClient;
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final AuthorizationHeaderBuilder ahb = AuthorizationHeaderBuilder();
     ahb.signatureMethod = _signatureMethod;
     ahb.clientCredentials = _clientCredentials;
@@ -49,7 +49,7 @@ class Client extends http.BaseClient {
     }
     ahb.additionalParameters = additionalParameters;
 
-    request.headers['Authorization'] = ahb.build().toString();
-    return _httpClient.send(request);
+    request.headers['Authorization'] = await ahb.build().encode();
+    return await _httpClient.send(request);
   }
 }
