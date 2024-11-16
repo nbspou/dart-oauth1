@@ -66,9 +66,8 @@ class Authorization {
   /// http://tools.ietf.org/html/rfc5849#section-2.2
   String getResourceOwnerAuthorizationURI(
       String temporaryCredentialsIdentifier) {
-    return _platform.resourceOwnerAuthorizationURI +
-        '?oauth_token=' +
-        Uri.encodeComponent(temporaryCredentialsIdentifier);
+    return '${_platform.resourceOwnerAuthorizationURI}'
+        '?oauth_token=${Uri.encodeComponent(temporaryCredentialsIdentifier)}';
   }
 
   /// Obtain a set of token credentials from the server.

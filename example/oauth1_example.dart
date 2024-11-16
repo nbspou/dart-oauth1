@@ -51,6 +51,6 @@ void main() {
     });
 
     // NOTE: you can get optional values from AuthorizationResponse object
-    print('Your screen name is ' + res.optionalParameters['screen_name']!);
+    print('Your screen name is ${res.optionalParameters['screen_name']!}');
   });
 }

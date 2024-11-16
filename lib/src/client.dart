@@ -16,7 +16,7 @@ import 'signature_method.dart';
 class Client extends http.BaseClient {
   final SignatureMethod _signatureMethod;
   final ClientCredentials _clientCredentials;
-  final Credentials _credentials;
+  final Credentials? _credentials;
   final http.BaseClient _httpClient;
 
   /// A constructor of Client.
@@ -25,8 +25,7 @@ class Client extends http.BaseClient {
   /// https://api.dartlang.org/apidocs/channels/stable/dartdoc-viewer/http/http-browser_client.BrowserClient
   Client(this._signatureMethod, this._clientCredentials, this._credentials,
       [http.BaseClient? httpClient])
-      : _httpClient =
-            httpClient != null ? httpClient : http.Client() as http.BaseClient;
+      : _httpClient = httpClient ?? http.Client() as http.BaseClient;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {

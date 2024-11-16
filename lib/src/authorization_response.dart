@@ -2,7 +2,7 @@ library authorization_response;
 
 import 'credentials.dart';
 
-/// A class describing Response of Authoriazation request.
+/// A class describing Response of Authorization request.
 class AuthorizationResponse {
   final Credentials _credentials;
   final Map<String, String> _optionalParameters;

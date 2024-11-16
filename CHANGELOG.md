@@ -1,3 +1,6 @@
+## 2.1.0
+- Support for newer Dart and `http` versions
+
 ## 2.0.0
 - Migrate to null safety
 

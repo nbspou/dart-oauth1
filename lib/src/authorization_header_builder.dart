@@ -25,7 +25,7 @@ class AuthorizationHeaderBuilder {
 
   set signatureMethod(SignatureMethod value) => _signatureMethod = value;
   set clientCredentials(ClientCredentials value) => _clientCredentials = value;
-  set credentials(Credentials value) => _credentials = value;
+  set credentials(Credentials? value) => _credentials = value;
   set method(String value) => _method = value;
   set url(String value) => _url = value;
   set additionalParameters(Map<String, String> value) =>

@@ -53,10 +53,9 @@ class AuthorizationHeader {
       params['oauth_signature'] = _createSignature(_method, _url, params);
     }
 
-    final String authHeader = 'OAuth ' +
-        params.keys.map((String k) {
-          return '$k="${Uri.encodeComponent(params[k]!)}"';
-        }).join(', ');
+    final String authHeader = 'OAuth ${params.keys.map((String k) {
+      return '$k="${Uri.encodeComponent(params[k]!)}"';
+    }).join(', ')}';
     return authHeader;
   }
 

@@ -12,7 +12,7 @@ Add to `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  oauth1: ^1.0.6
+  oauth1: ^2.1.0
 ```
 
 Please use like below.
